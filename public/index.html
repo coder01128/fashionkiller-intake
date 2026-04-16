@@ -206,12 +206,43 @@
   #sidebarResize{position:absolute;right:-3px;top:0;bottom:0;width:6px;cursor:ew-resize;z-index:10;background:transparent}
   #sidebarResize:hover,#sidebarResize.dragging{background:var(--pink)}
   #sidebar{position:relative}
+  /* Login screen */
+  #loginScreen{position:fixed;inset:0;background:var(--bg);z-index:500;display:flex;align-items:center;justify-content:center}
+  .login-box{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:40px;max-width:380px;width:90%;text-align:center}
+  .login-box .brand{font-size:32px;margin-bottom:6px}
+  .login-box .sub{color:var(--muted);font-size:13px;margin-bottom:24px}
+  .login-box input{margin-bottom:12px}
+  .login-box .login-btn{width:100%;background:var(--pink);border:none;color:#fff;padding:12px;border-radius:6px;font-weight:600;cursor:pointer;font-family:inherit;font-size:14px;margin-bottom:10px}
+  .login-box .login-btn:hover{background:var(--pink-dim)}
+  .login-box .login-btn:disabled{background:var(--border);cursor:not-allowed}
+  .login-box .login-msg{font-size:12px;min-height:20px;margin-top:8px}
+  .login-box .login-msg.ok{color:var(--good)}
+  .login-box .login-msg.err{color:#f87171}
+  .login-box .skip{color:var(--muted);font-size:11px;cursor:pointer;text-decoration:underline;margin-top:14px;display:inline-block}
+  .login-box .skip:hover{color:var(--text)}
+  .sync-badge{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--muted);padding:4px 10px}
+  .sync-badge .dot{width:6px;height:6px;border-radius:50%;flex-shrink:0}
+  .sync-online{background:var(--good)}
+  .sync-offline{background:var(--warn)}
+  .sync-syncing{background:var(--pink);animation:syncPulse 1s infinite}
+  @keyframes syncPulse{0%,100%{opacity:1}50%{opacity:.3}}
 </style>
 </head>
 <body>
-<div id="app">
+<div id="loginScreen">
+  <div class="login-box">
+    <div class="brand">FASHIONKILLER</div>
+    <div class="sub">Product Intake System</div>
+    <input id="loginEmail" type="email" placeholder="Enter your email" onkeydown="if(event.key==='Enter')doLogin()">
+    <button class="login-btn" id="loginBtn" onclick="doLogin()">Sign in with email</button>
+    <div class="login-msg" id="loginMsg"></div>
+    <div class="skip" onclick="skipLogin()">Continue without account (offline only)</div>
+  </div>
+</div>
+<div id="app" style="display:none">
   <header>
     <div class="brand">FASHIONKILLER · INTAKE</div>
+    <div id="syncBadge" class="sync-badge"><span class="dot sync-offline"></span><span>Offline</span></div>
     <div class="progress">
       <div class="progress-bar"><div class="progress-fill" id="progFill"></div></div>
       <div class="progress-text" id="progText">0 / 0 complete</div>
@@ -250,7 +281,298 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.3.0/exceljs.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 <script>
+// ============ SUPABASE ============
+const SUPABASE_URL = 'https://fbinlujynlxrgnfeozux.supabase.co';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZiaW5sdWp5bmx4cmduZmVvenV4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzYzNjY4NzEsImV4cCI6MjA5MTk0Mjg3MX0.SczOtfz5PQb7LnbLSE-RKv5-uvKqJYX8ujpXqleFV7g';
+
+let sb = null;  // Supabase client, initialized after CDN loads
+let sbUser = null;  // Current authenticated user
+let syncStatus = 'offline';  // offline | syncing | synced | error
+let syncQueue = [];  // Queue of product IDs to sync
+let syncTimer = null;
+
+function initSupabase(){
+  if (typeof supabase !== 'undefined' && supabase.createClient) {
+    sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+    console.log('[Supabase] Client initialized');
+    // Listen for auth changes
+    sb.auth.onAuthStateChange((event, session) => {
+      console.log('[Auth]', event, session?.user?.email);
+      if (session?.user) {
+        sbUser = session.user;
+        updateSyncBadge('synced');
+        // Initial sync from cloud
+        syncFromCloud();
+      } else {
+        sbUser = null;
+        updateSyncBadge('offline');
+      }
+    });
+    // Check existing session
+    sb.auth.getSession().then(({data:{session}}) => {
+      if (session?.user) {
+        sbUser = session.user;
+        document.getElementById('loginScreen').style.display = 'none';
+        document.getElementById('app').style.display = '';
+        updateSyncBadge('synced');
+        loadAll();
+      }
+    });
+    return true;
+  }
+  return false;
+}
+
+// ============ AUTH ============
+async function doLogin(){
+  const email = document.getElementById('loginEmail').value.trim();
+  const msg = document.getElementById('loginMsg');
+  const btn = document.getElementById('loginBtn');
+  if (!email || !email.includes('@')){ msg.textContent = 'Enter a valid email'; msg.className = 'login-msg err'; return; }
+  if (!sb){ msg.textContent = 'Supabase not loaded. Check connection.'; msg.className = 'login-msg err'; return; }
+  btn.disabled = true;
+  btn.textContent = 'Sending...';
+  msg.textContent = '';
+  try {
+    // Try password-less sign up/in with OTP
+    const { error } = await sb.auth.signInWithOtp({
+      email,
+      options: { shouldCreateUser: true }
+    });
+    if (error) throw error;
+    msg.textContent = '✓ Check your email for a login link!';
+    msg.className = 'login-msg ok';
+    btn.textContent = 'Check your email';
+    // Start polling for session (user clicked magic link in another tab)
+    pollForSession();
+  } catch(e){
+    msg.textContent = e.message || 'Login failed';
+    msg.className = 'login-msg err';
+    btn.disabled = false;
+    btn.textContent = 'Sign in with email';
+  }
+}
+
+function pollForSession(){
+  const poll = setInterval(async () => {
+    const { data: { session } } = await sb.auth.getSession();
+    if (session?.user) {
+      clearInterval(poll);
+      sbUser = session.user;
+      document.getElementById('loginScreen').style.display = 'none';
+      document.getElementById('app').style.display = '';
+      updateSyncBadge('synced');
+      loadAll();
+    }
+  }, 2000);
+  // Stop polling after 5 minutes
+  setTimeout(() => clearInterval(poll), 5 * 60 * 1000);
+}
+
+function skipLogin(){
+  document.getElementById('loginScreen').style.display = 'none';
+  document.getElementById('app').style.display = '';
+  updateSyncBadge('offline');
+  loadAll();
+}
+
+function updateSyncBadge(status){
+  syncStatus = status;
+  const badge = document.getElementById('syncBadge');
+  if (!badge) return;
+  const labels = {offline:'Offline', syncing:'Syncing...', synced:'Synced ✓', error:'Sync error'};
+  const dots = {offline:'sync-offline', syncing:'sync-syncing', synced:'sync-online', error:'sync-offline'};
+  badge.innerHTML = `<span class="dot ${dots[status]||'sync-offline'}"></span><span>${labels[status]||status}</span>${sbUser ? `<span style="margin-left:4px">(${sbUser.email})</span>` : ''}`;
+}
+
+// ============ CLOUD SYNC ============
+function productToRow(p){
+  return {
+    id: p.id,
+    user_id: sbUser.id,
+    name: p.name||'', code: p.code||'', keywords: p.keywords||'',
+    description: p.description||'', short_description: p.shortDescription||'',
+    category: p.category||'', tags: p.tags||'',
+    sizes: p.sizes||[], colours: p.colours||[],
+    stock_by_size: p.stockBySize||{},
+    cost_price: parseFloat(p.costPrice)||null,
+    shipping_per_unit: parseFloat(p.shippingPerUnit)||null,
+    duty_multiplier: parseFloat(p.dutyMultiplier)||1.34,
+    retail_price: parseFloat(p.retailPrice)||null,
+    sale_price: parseFloat(p.salePrice)||null,
+    currency: p.currency||'ZAR',
+    weight_grams: parseInt(p.weightGrams)||null,
+    supplier_name: p.supplierName||'', supplier_url: p.supplierUrl||'',
+    specs: p.specs||{}, sizing_chart_data: p.sizingChartData||[],
+    care_instructions: p.careInstructions||'', model_info: p.modelInfo||'',
+    slot1_status: p.slot1Status||'empty', slot2_status: p.slot2Status||'empty', slot3_status: p.slot3Status||'empty',
+    manual_review_done: p.manualReviewDone||false,
+    slot1_image_paths: p.slot1ImageIds||[], slot2_image_paths: p.slot2ImageIds||[],
+    slot3_image_paths: p.slot3ImageIds||[], gallery_image_paths: p.galleryImageIds||[],
+    primary_image_path: (p.slot1ImageIds&&p.slot1ImageIds[0])||(p.imageIds&&p.imageIds[0])||null,
+    sizing_chart_image_path: (p.slot2ImageIds&&p.slot2ImageIds[0])||p.sizingChartId||null,
+    sort_order: state.products.indexOf(p),
+  };
+}
+
+function rowToProduct(row){
+  return {
+    id: row.id, name: row.name||'', code: row.code||'', keywords: row.keywords||'',
+    description: row.description||'', shortDescription: row.short_description||'',
+    category: row.category||'', tags: row.tags||'',
+    sizes: row.sizes||[], colours: row.colours||[],
+    stockBySize: row.stock_by_size||{},
+    costPrice: row.cost_price!=null?String(row.cost_price):'',
+    shippingPerUnit: row.shipping_per_unit!=null?String(row.shipping_per_unit):'',
+    dutyMultiplier: row.duty_multiplier!=null?String(row.duty_multiplier):'1.34',
+    retailPrice: row.retail_price!=null?String(row.retail_price):'',
+    salePrice: row.sale_price!=null?String(row.sale_price):'',
+    currency: row.currency||'ZAR',
+    weightGrams: row.weight_grams!=null?String(row.weight_grams):'',
+    supplierName: row.supplier_name||'', supplierUrl: row.supplier_url||'',
+    specs: row.specs||{}, sizingChartData: row.sizing_chart_data||[],
+    careInstructions: row.care_instructions||'', modelInfo: row.model_info||'',
+    slot1Status: row.slot1_status||'empty', slot2Status: row.slot2_status||'empty', slot3Status: row.slot3_status||'empty',
+    manualReviewDone: row.manual_review_done||false,
+    slot1ImageIds: row.slot1_image_paths||[], slot2ImageIds: row.slot2_image_paths||[],
+    slot3ImageIds: row.slot3_image_paths||[], galleryImageIds: row.gallery_image_paths||[],
+    imageIds: row.primary_image_path?[row.primary_image_path]:[],
+    sizingChartId: row.sizing_chart_image_path||null,
+  };
+}
+
+async function syncProductToCloud(p){
+  if (!sb || !sbUser) return;
+  try {
+    const row = productToRow(p);
+    const { error } = await sb.from('products').upsert(row, {onConflict:'id'});
+    if (error) { console.warn('[Sync] Product upsert error:', error.message); return; }
+    // Sync images for this product
+    const allImgIds = [...new Set([
+      ...(p.slot1ImageIds||[]), ...(p.slot2ImageIds||[]),
+      ...(p.slot3ImageIds||[]), ...(p.galleryImageIds||[]),
+      ...(p.imageIds||[]), ...(p.sizingChartId?[p.sizingChartId]:[])
+    ])];
+    for (const imgId of allImgIds){
+      await syncImageToCloud(imgId);
+    }
+  } catch(e){ console.warn('[Sync] Product sync failed:', e); }
+}
+
+async function syncImageToCloud(imgId){
+  if (!sb || !sbUser) return;
+  try {
+    const dataUrl = await loadImage(imgId);
+    if (!dataUrl) return;
+    const b64 = dataUrl.split(',')[1];
+    const bin = atob(b64);
+    const arr = new Uint8Array(bin.length);
+    for (let i=0;i<bin.length;i++) arr[i] = bin.charCodeAt(i);
+    const blob = new Blob([arr], {type:'image/jpeg'});
+    const path = `${sbUser.id}/${imgId}.jpg`;
+    const { error } = await sb.storage.from('product-images').upload(path, blob, {contentType:'image/jpeg', upsert:true});
+    if (error && !error.message.includes('already exists')) console.warn('[Sync] Image upload error:', imgId, error.message);
+  } catch(e){ console.warn('[Sync] Image sync failed:', imgId, e); }
+}
+
+async function syncFromCloud(){
+  if (!sb || !sbUser) return;
+  updateSyncBadge('syncing');
+  try {
+    const { data: cloudRows, error } = await sb.from('products')
+      .select('*').eq('user_id', sbUser.id).order('sort_order');
+    if (error) throw error;
+    if (!cloudRows || !cloudRows.length) {
+      // No cloud data — push local data up
+      console.log('[Sync] No cloud data. Pushing local products up...');
+      for (const p of state.products) {
+        await syncProductToCloud(p);
+      }
+      updateSyncBadge('synced');
+      return;
+    }
+    // Merge: cloud products not in local get added locally
+    const localIds = new Set(state.products.map(p=>p.id));
+    let added = 0;
+    for (const row of cloudRows) {
+      if (!localIds.has(row.id)) {
+        const p = rowToProduct(row);
+        state.products.push(p);
+        await STORE.set('fk:p:'+p.id, JSON.stringify(p)).catch(()=>{});
+        // Download images from cloud to local
+        const allImgIds = [...new Set([
+          ...(p.slot1ImageIds||[]), ...(p.slot2ImageIds||[]),
+          ...(p.slot3ImageIds||[]), ...(p.galleryImageIds||[]),
+          ...(p.imageIds||[]), ...(p.sizingChartId?[p.sizingChartId]:[])
+        ])];
+        for (const imgId of allImgIds){
+          await downloadImageFromCloud(imgId);
+        }
+        added++;
+      }
+    }
+    if (added) {
+      await saveMeta();
+      renderAll();
+      showToast(`Synced ${added} product${added>1?'s':''} from cloud`);
+    }
+    // Also push any local products not in cloud
+    const cloudIds = new Set(cloudRows.map(r=>r.id));
+    for (const p of state.products){
+      if (!cloudIds.has(p.id)) await syncProductToCloud(p);
+    }
+    updateSyncBadge('synced');
+  } catch(e){
+    console.warn('[Sync] Full sync failed:', e);
+    updateSyncBadge('error');
+  }
+}
+
+async function downloadImageFromCloud(imgId){
+  if (!sb || !sbUser) return;
+  // Check if already in local
+  try {
+    const existing = await STORE.get('fk:img:'+imgId);
+    if (existing) return;  // Already have it locally
+  } catch(e){}
+  try {
+    const path = `${sbUser.id}/${imgId}.jpg`;
+    const { data, error } = await sb.storage.from('product-images').download(path);
+    if (error || !data) return;
+    const dataUrl = await new Promise(r => { const fr = new FileReader(); fr.onload = ()=>r(fr.result); fr.readAsDataURL(data); });
+    await STORE.set('fk:img:'+imgId, dataUrl);
+  } catch(e){ console.warn('[Sync] Image download failed:', imgId, e); }
+}
+
+async function deleteProductFromCloud(productId){
+  if (!sb || !sbUser) return;
+  try {
+    await sb.from('products').delete().eq('id', productId).eq('user_id', sbUser.id);
+  } catch(e){ console.warn('[Sync] Delete failed:', e); }
+}
+
+// Debounced sync — batches rapid saves into one sync operation
+function queueSync(productId){
+  if (!sb || !sbUser) return;
+  if (!syncQueue.includes(productId)) syncQueue.push(productId);
+  clearTimeout(syncTimer);
+  syncTimer = setTimeout(flushSyncQueue, 2000);  // Wait 2s after last save
+}
+
+async function flushSyncQueue(){
+  if (!syncQueue.length || !sb || !sbUser) return;
+  updateSyncBadge('syncing');
+  const ids = [...syncQueue];
+  syncQueue = [];
+  for (const id of ids){
+    const p = state.products.find(x=>x.id===id);
+    if (p) await syncProductToCloud(p);
+  }
+  updateSyncBadge('synced');
+}
+
 // ============ STATE ============
 let state = {
   products: [],
@@ -398,6 +720,8 @@ async function saveProduct(p){
   showSaved();
   state.savesSinceBackup++;
   if (state.savesSinceBackup >= 50) checkBackupReminder();
+  // Queue cloud sync (debounced)
+  queueSync(p.id);
 }
 function checkBackupReminder(){
   state.savesSinceBackup = 0;
@@ -930,6 +1254,7 @@ function deleteProduct(){
   p.imageIds.forEach(deleteImage);
   if (p.sizingChartId) deleteImage(p.sizingChartId);
   STORE.delete('fk:p:'+p.id).catch(()=>{});
+  deleteProductFromCloud(p.id);  // Also remove from cloud
   const idx = state.products.indexOf(p);
   state.products.splice(idx,1);
   state.activeId = state.products[Math.min(idx,state.products.length-1)]?.id || null;
@@ -2263,7 +2588,29 @@ function updSizing(rowIdx, key, val){
 }
 
 // ============ INIT ============
-loadAll();
+// Try to init Supabase. If user has active session, skip login screen.
+// Otherwise, show login screen and wait.
+(function boot(){
+  const hasSupabase = initSupabase();
+  if (!hasSupabase) {
+    // Supabase CDN didn't load — go offline
+    console.warn('[Boot] Supabase not available, running offline');
+    document.getElementById('loginScreen').style.display = 'none';
+    document.getElementById('app').style.display = '';
+    loadAll();
+  }
+  // If Supabase loaded, the auth state listener in initSupabase() handles
+  // showing/hiding login screen and calling loadAll().
+  // But we need to handle the case where there's no saved session:
+  if (hasSupabase) {
+    sb.auth.getSession().then(({data:{session}}) => {
+      if (!session) {
+        // No session — show login screen (it's already visible by default)
+        // User can click "Continue without account" to skip
+      }
+    });
+  }
+})();
 </script>
 </body>
 </html>
