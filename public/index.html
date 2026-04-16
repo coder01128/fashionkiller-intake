@@ -1482,6 +1482,7 @@ async function exportFKStockList(){
     { header: 'SKU', key: 'sku', width: 16 },
     { header: 'NAME OF PRODUCT', key: 'name', width: 32 },
     { header: 'SHORT PRODUCT DESCRIPTION', key: 'desc', width: 34 },
+    { header: 'FULL DESCRIPTION', key: 'fullDesc', width: 50 },
     { header: 'SIZES', key: 'sizes', width: 22 },
     { header: 'RETAIL PRICE', key: 'retail', width: 16 },
     { header: '', key: 'gap1', width: 2 },
@@ -1534,7 +1535,8 @@ async function exportFKStockList(){
     const row = ws.addRow({
       sku: p.code,
       name: p.name,
-      desc: p.shortDescription || p.description,
+      desc: p.shortDescription || '',
+      fullDesc: p.description || '',
       sizes: sizesStr,
       retail: parseFloat(p.retailPrice) || null,  // retail is value from app, not formula
       wholesale: wholesale,
@@ -1561,8 +1563,8 @@ async function exportFKStockList(){
     });
 
     // Set formulas: Cost Price = Wholesale × Import Duty ; Profit = Retail - Cost
-    row.getCell('cost').value = { formula: `G${rowNum}*H${rowNum}`, result: wholesale * duty };
-    row.getCell('profit').value = { formula: `E${rowNum}-I${rowNum}`, result: (parseFloat(p.retailPrice)||0) - (wholesale * duty) };
+    row.getCell('cost').value = { formula: `H${rowNum}*I${rowNum}`, result: wholesale * duty };
+    row.getCell('profit').value = { formula: `F${rowNum}-J${rowNum}`, result: (parseFloat(p.retailPrice)||0) - (wholesale * duty) };
 
     // Currency format for price cells
     ['retail', 'wholesale', 'cost', 'profit'].forEach(k => {
@@ -1581,16 +1583,16 @@ async function exportFKStockList(){
         if (dataUrl) {
           const b64 = dataUrl.split(',')[1];
           const imgId = wb.addImage({ base64: b64, extension: 'jpeg' });
-          // Place image in column M (index 12), current row
+          // Place image in column N (index 13), after FULL DESCRIPTION column was added
           ws.addImage(imgId, {
-            tl: { col: 12.1, row: rowNum - 1 + 0.1 },
+            tl: { col: 13.1, row: rowNum - 1 + 0.1 },
             ext: { width: 100, height: 100 }
           });
         }
       } catch (e) { console.warn('Image embed failed for product', p.code, e); }
     }
 
-    // Embed sizing chart image in column N (index 13), right after IMAGE
+    // Embed sizing chart image in column O (index 14), right after IMAGE
     const sizingImgId = (p.slot2ImageIds && p.slot2ImageIds[0]) || p.sizingChartId;
     if (sizingImgId) {
       try {
@@ -1599,7 +1601,7 @@ async function exportFKStockList(){
           const b64 = dataUrl.split(',')[1];
           const imgId = wb.addImage({ base64: b64, extension: 'jpeg' });
           ws.addImage(imgId, {
-            tl: { col: 13.1, row: rowNum - 1 + 0.1 },
+            tl: { col: 14.1, row: rowNum - 1 + 0.1 },
             ext: { width: 100, height: 100 }
           });
         }
