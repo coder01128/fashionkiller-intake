@@ -1098,12 +1098,7 @@ async function renderEditor(){
           <div class="help">Cost × this = landed cost. Update when actual customs invoice arrives.</div>
         </div>
       </div>
-      ${(parseFloat(p.shippingTotal)>0 && parseInt(p.shippingItems)>0) ? `
-        <div class="calc-box" style="margin-bottom:10px">
-          <span class="calc-label">Shipping / unit (${fmt(parseFloat(p.shippingTotal))} ÷ ${parseInt(p.shippingItems)} items)</span>
-          <span class="calc-value" style="font-size:18px">${fmt(parseFloat(p.shippingTotal)/parseInt(p.shippingItems))}</span>
-        </div>
-      ` : ''}
+      <div id="shipCalcArea"></div>
       <div id="calcArea"></div>
       <div class="field" style="margin-top:14px">
         <label>Retail Price (your selling price)</label>
@@ -1193,6 +1188,21 @@ function renderCalc(){
   const margin = retail > 0 ? ((retail - landed) / retail * 100) : 0;
   const markup = landed > 0 ? (retail / landed) : 0;
   const suggested = landed / (1 - state.settings.targetMarginPct/100);
+
+  // Shipping per unit display
+  const shipArea = document.getElementById('shipCalcArea');
+  const shipTotal = parseFloat(p.shippingTotal)||0;
+  const shipItems = parseInt(p.shippingItems)||0;
+  if (shipArea) {
+    if (shipTotal > 0 && shipItems > 0) {
+      shipArea.innerHTML = `<div class="calc-box" style="margin-top:10px">
+        <span class="calc-label">Shipping / unit (${fmt(shipTotal)} ÷ ${shipItems} items)</span>
+        <span class="calc-value" style="font-size:18px">${fmt(shipTotal/shipItems)}</span>
+      </div>`;
+    } else {
+      shipArea.innerHTML = '';
+    }
+  }
 
   const calc = document.getElementById('calcArea');
   if (calc) calc.innerHTML = `
@@ -2718,7 +2728,7 @@ async function applySlotResult(n, result){
   if (n === 1){
     if (result.name) p.name = result.name;
     if (result.shortDescription) p.shortDescription = result.shortDescription;
-    if (result.description) p.description = result.description;
+    // Do NOT auto-fill full description — Dommie writes her own content here
     if (result.keywords) p.keywords = result.keywords;
     if (result.tags) p.tags = result.tags;
     if (result.category) p.category = result.category;
