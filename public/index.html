@@ -232,6 +232,16 @@
   .login-box .skip:hover{color:var(--text)}
   .sync-badge{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--muted);padding:4px 10px}
   .sync-badge .dot{width:6px;height:6px;border-radius:50%;flex-shrink:0}
+  /* Motivational modal */
+  .motive-modal{position:fixed;inset:0;background:rgba(0,0,0,.8);display:flex;align-items:center;justify-content:center;z-index:400;animation:fadeIn .4s}
+  .motive-box{background:linear-gradient(145deg, #1a1a1a 0%, #0a0a0a 100%);border:1px solid var(--pink);border-radius:16px;padding:40px 36px;max-width:440px;width:90%;text-align:center;position:relative;box-shadow:0 0 60px rgba(255,0,110,.15)}
+  .motive-box .motive-emoji{font-size:48px;margin-bottom:16px}
+  .motive-box .motive-quote{font-family:'Inter';font-size:16px;line-height:1.6;color:var(--text);margin-bottom:8px;font-style:italic}
+  .motive-box .motive-author{font-size:12px;color:var(--pink);margin-bottom:20px;letter-spacing:1px}
+  .motive-box .motive-dommie{font-size:13px;color:var(--muted);line-height:1.5;margin-bottom:24px;padding:14px;background:rgba(255,0,110,.05);border-radius:8px;border:1px solid rgba(255,0,110,.15)}
+  .motive-box .motive-close{background:var(--pink);border:none;color:#fff;padding:12px 32px;border-radius:8px;font-weight:600;cursor:pointer;font-family:inherit;font-size:14px;letter-spacing:1px}
+  .motive-box .motive-close:hover{background:var(--pink-dim)}
+  @keyframes fadeIn{from{opacity:0}to{opacity:1}}
   .sync-online{background:var(--good)}
   .sync-offline{background:var(--warn)}
   .sync-syncing{background:var(--pink);animation:syncPulse 1s infinite}
@@ -328,6 +338,7 @@ function initSupabase(){
         document.getElementById('app').style.display = '';
         updateSyncBadge('synced');
         loadAll();
+        setTimeout(showMotivationalQuote, 500);
       }
     });
     return true;
@@ -375,6 +386,7 @@ function pollForSession(){
       document.getElementById('app').style.display = '';
       updateSyncBadge('synced');
       loadAll();
+      setTimeout(showMotivationalQuote, 500);
     }
   }, 2000);
   // Stop polling after 5 minutes
@@ -386,6 +398,7 @@ function skipLogin(){
   document.getElementById('app').style.display = '';
   updateSyncBadge('offline');
   loadAll();
+  setTimeout(showMotivationalQuote, 500);
 }
 
 function updateSyncBadge(status){
@@ -918,8 +931,8 @@ async function renderEditor(){
   if (!p){
     ed.innerHTML = `<div class="empty-state">
       <h2>Welcome to FashionKiller Intake</h2>
-      <p>Add your first product to get started, or click <b>+70</b> to bulk-create blank rows.</p>
-      <p style="margin-top:14px;font-size:11px">Tip: paste images directly into product cards with <kbd>Cmd/Ctrl+V</kbd></p>
+      <p>Add your first product to get started.</p>
+      <p style="margin-top:14px;font-size:11px">Did you know? You can use copy / paste to add images directly to the Product Cards</p>
     </div>`;
     return;
   }
@@ -2671,6 +2684,60 @@ function updSizing(rowIdx, key, val){
   saveProduct(p);
 }
 
+// ============ MOTIVATIONAL QUOTES ============
+const QUOTES = [
+  { text: "She believed she could, so she did.", author: "R.S. Grey", emoji: "👑" },
+  { text: "The woman who follows the crowd will usually go no further than the crowd. The woman who walks alone is likely to find herself in places no one has ever been before.", author: "Albert Einstein", emoji: "🔥" },
+  { text: "You didn't come this far to only come this far.", author: "", emoji: "💎" },
+  { text: "A brand is a story that's always being told.", author: "Scott Bedbury", emoji: "✨" },
+  { text: "Don't be afraid to give up the good to go for the great.", author: "John D. Rockefeller", emoji: "🚀" },
+  { text: "The secret of getting ahead is getting started.", author: "Mark Twain", emoji: "⚡" },
+  { text: "Fashion is about dressing according to what's fashionable. Style is more about being yourself.", author: "Oscar de la Renta", emoji: "👗" },
+  { text: "Success is not final, failure is not fatal: it is the courage to continue that counts.", author: "Winston Churchill", emoji: "💪" },
+  { text: "Every expert was once a beginner.", author: "", emoji: "🌟" },
+  { text: "Your vibe attracts your tribe.", author: "", emoji: "🦋" },
+  { text: "Build something people want, then tell them about it.", author: "Paul Graham", emoji: "🎯" },
+  { text: "The best time to plant a tree was 20 years ago. The second best time is now.", author: "Chinese Proverb", emoji: "🌱" },
+  { text: "Stop doubting yourself. Work hard, and make it happen.", author: "", emoji: "💅" },
+  { text: "Small steps every day lead to big results.", author: "", emoji: "👣" },
+  { text: "Difficult roads often lead to beautiful destinations.", author: "", emoji: "🗺️" },
+  { text: "You are one product away from changing everything.", author: "", emoji: "🛍️" },
+  { text: "Hustle in silence. Let your success make the noise.", author: "", emoji: "🤫" },
+  { text: "A queen is never late — the world just wasn't ready.", author: "", emoji: "👸" },
+  { text: "Create the things you wish existed.", author: "", emoji: "🎨" },
+  { text: "Your only limit is your mind.", author: "", emoji: "🧠" },
+];
+
+const DOMMIE_MESSAGES = [
+  "You're building something real, Dommie. Every product you add is a step closer to the empire. 🖤",
+  "FashionKiller didn't build itself — YOU did. Keep going, queen. 💅",
+  "70 products is a lot. But you've handled worse. Let's smash this. 🔥",
+  "Remember: every big brand started with one shipment and one stubborn woman who refused to quit. That's you. 👑",
+  "Today's hustle is tomorrow's 'remember when we started?' story. Let's make it count. ⚡",
+  "The fashion game needs more women like you. Go show them how it's done. 🦋",
+  "One product at a time. One customer at a time. One day you'll look back and be amazed how far you came. 🌟",
+  "Dommie, the world doesn't need another fast-fashion copy. It needs YOUR eye, YOUR taste, YOUR brand. That's FashionKiller. 💎",
+  "Tokio believes in you. And so do we. Now let's get to work. 🐶",
+  "Not every day will be easy. But every day you show up is a day you win. You showed up today. 💪",
+];
+
+function showMotivationalQuote(){
+  const q = QUOTES[Math.floor(Math.random() * QUOTES.length)];
+  const d = DOMMIE_MESSAGES[Math.floor(Math.random() * DOMMIE_MESSAGES.length)];
+  const m = document.createElement('div');
+  m.className = 'motive-modal';
+  m.innerHTML = `<div class="motive-box">
+    <div class="motive-emoji">${q.emoji}</div>
+    <div class="motive-quote">"${q.text}"</div>
+    ${q.author ? `<div class="motive-author">— ${q.author}</div>` : '<div style="height:12px"></div>'}
+    <div class="motive-dommie">${d}</div>
+    <button class="motive-close" onclick="this.closest('.motive-modal').remove()">Let's Go 🔥</button>
+  </div>`;
+  document.body.appendChild(m);
+  // Close on background click
+  m.addEventListener('click', e => { if (e.target === m) m.remove(); });
+}
+
 // ============ INIT ============
 // Try to init Supabase. If user has active session, skip login screen.
 // Otherwise, show login screen and wait.
@@ -2682,6 +2749,7 @@ function updSizing(rowIdx, key, val){
     document.getElementById('loginScreen').style.display = 'none';
     document.getElementById('app').style.display = '';
     loadAll();
+    setTimeout(showMotivationalQuote, 500);
   }
   // If Supabase loaded, the auth state listener in initSupabase() handles
   // showing/hiding login screen and calling loadAll().
