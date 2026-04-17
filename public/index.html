@@ -123,15 +123,18 @@
   table.master th{background:var(--panel);padding:10px 10px;text-align:left;text-transform:uppercase;font-size:11px;font-weight:700;letter-spacing:1px;color:#fff;border-bottom:2px solid var(--border);border-right:1px solid var(--border);position:sticky;top:0;cursor:pointer;white-space:nowrap;z-index:2;user-select:none}
   table.master th:hover{color:var(--pink)}
   table.master th.sort-active{color:var(--pink)}
-  table.master td{padding:4px 6px;border-bottom:1px solid var(--border);border-right:1px solid var(--border);vertical-align:middle}
+  table.master td{padding:6px 8px;border-bottom:1px solid var(--border);border-right:1px solid var(--border);vertical-align:top;word-wrap:break-word;white-space:normal;max-width:300px}
   table.master tr:hover td{background:rgba(255,0,110,.03)}
   table.master tr:nth-child(even) td{background:rgba(255,255,255,.015)}
-  table.master td.thumb-cell{width:44px;padding:4px}
-  table.master .row-thumb{width:36px;height:36px;background:var(--panel-2);border-radius:4px;background-size:cover;background-position:center}
+  table.master td.thumb-cell{width:44px;padding:4px;vertical-align:middle}
+  table.master .row-thumb{width:36px;height:36px;background:var(--panel-2);border-radius:4px;background-size:cover;background-position:center;cursor:pointer}
   table.master input,table.master select{background:transparent;border:1px solid transparent;padding:4px 6px;border-radius:3px;font-size:12px;width:100%;color:var(--text);font-family:inherit}
   table.master input:hover,table.master select:hover{border-color:var(--border)}
-  table.master input:focus,table.master select:focus{border-color:var(--pink);background:var(--panel-2);outline:none}
+  table.master input:focus,table.master select:focus,table.master textarea:focus{border-color:var(--pink);background:var(--panel-2);outline:none}
+  table.master textarea{background:transparent;border:1px solid transparent;padding:4px 6px;border-radius:3px;font-size:12px;width:100%;color:var(--text);font-family:inherit;resize:vertical;min-height:60px}
   table.master input[type=number]{text-align:right;font-variant-numeric:tabular-nums}
+  .table-img-strip{display:flex;gap:3px;flex-wrap:wrap}
+  .table-img-strip .timg{width:32px;height:32px;border-radius:3px;background-size:cover;background-position:center;background-color:var(--panel-2);cursor:pointer;flex-shrink:0}
   table.master .cell-formula{color:var(--pink);font-weight:600;text-align:right;font-variant-numeric:tabular-nums;padding:4px 8px;font-size:12px}
   table.master .cell-computed{color:var(--muted);font-style:italic;text-align:right;padding:4px 8px;font-size:11px}
   table.master .row-num{color:var(--muted);font-size:10px;text-align:center;width:30px;padding:4px}
@@ -456,7 +459,7 @@ function productToRow(p){
     sizes: p.sizes||[], colours: p.colours||[],
     stock_by_size: p.stockBySize||{},
     cost_price: parseFloat(p.costPrice)||null,
-    shipping_per_unit: parseFloat(p.shippingPerUnit)||null,
+    shipping_per_unit: calcShipPerUnit(p),
     duty_multiplier: parseFloat(p.dutyMultiplier)||1.34,
     retail_price: parseFloat(p.retailPrice)||null,
     sale_price: parseFloat(p.salePrice)||null,
@@ -483,6 +486,7 @@ function rowToProduct(row){
     sizes: row.sizes||[], colours: row.colours||[],
     stockBySize: row.stock_by_size||{},
     costPrice: row.cost_price!=null?String(row.cost_price):'',
+    shippingTotal: '', shippingItems: '',
     shippingPerUnit: row.shipping_per_unit!=null?String(row.shipping_per_unit):'',
     dutyMultiplier: row.duty_multiplier!=null?String(row.duty_multiplier):'1.34',
     retailPrice: row.retail_price!=null?String(row.retail_price):'',
@@ -638,8 +642,6 @@ let state = {
   view: 'card',
   tableSort: {col:'name', dir:'asc'},
   sidebarWidth: 280,
-  savesSinceBackup: 0,
-  lastBackupTime: null,
   settings: {
     dutyRate: 45,           // legacy, no longer used for calc
     vatRate: 15,            // legacy
@@ -776,31 +778,8 @@ async function saveMeta(){
 async function saveProduct(p){
   await STORE.set('fk:p:'+p.id, JSON.stringify(p)).catch(e=>console.warn(e));
   showSaved();
-  state.savesSinceBackup++;
-  if (state.savesSinceBackup >= 50) checkBackupReminder();
   queueSync(p.id);
   renderScorecard();
-}
-function checkBackupReminder(){
-  state.savesSinceBackup = 0;
-  // Only prompt if last backup was >15 min ago or never
-  const ago = state.lastBackupTime ? (Date.now() - state.lastBackupTime) : Infinity;
-  if (ago < 15 * 60 * 1000) return;
-  showBackupPrompt();
-}
-function showBackupPrompt(){
-  const m = document.createElement('div');
-  m.className = 'modal-bg';
-  m.innerHTML = `<div class="modal" style="text-align:center;max-width:400px">
-    <div style="font-size:40px;margin-bottom:10px">💾</div>
-    <h3>Time to back up!</h3>
-    <p style="color:var(--muted);font-size:13px;margin-bottom:16px">You've been working hard. Save a backup now so nothing gets lost.</p>
-    <div class="modal-actions" style="justify-content:center">
-      <button class="btn" onclick="this.closest('.modal-bg').remove()">Later</button>
-      <button class="btn btn-primary" onclick="exportBackup();this.closest('.modal-bg').remove()">💾 Backup Now</button>
-    </div>
-  </div>`;
-  document.body.appendChild(m);
 }
 async function saveImage(imgId, dataUrl){
   await STORE.set('fk:img:'+imgId, dataUrl).catch(e=>console.warn(e));
@@ -849,7 +828,8 @@ function newProduct(overrides={}){
     modelInfo: '',
     // Existing fields
     costPrice: '',
-    shippingPerUnit: '',
+    shippingTotal: '',        // total shipping cost for this product
+    shippingItems: '',        // number of items in the shipment
     dutyMultiplier: state.settings.defaultDutyMultiplier || '1.34',
     retailPrice: '',
     salePrice: '',
@@ -999,7 +979,7 @@ async function renderEditor(){
       </div>
       <div class="pipeline-cta">
         <button class="cta-big" onclick="runPipeline()" ${pipelineReady(p) ? '' : 'disabled'}>
-          ${pipelineReady(p) ? '⚡ Extract All Slots' : 'Upload images to any slot to begin'}
+          ${pipelineReady(p) ? randomCTA() : 'Upload images to any slot to begin'}
         </button>
       </div>
     </div>
@@ -1105,8 +1085,12 @@ async function renderEditor(){
           <input type="number" step="0.01" value="${p.costPrice}" oninput="upd('costPrice',this.value);renderCalc()" placeholder="0.00">
         </div>
         <div class="field">
-          <label>Shipping / unit</label>
-          <input type="number" step="0.01" value="${p.shippingPerUnit}" oninput="upd('shippingPerUnit',this.value);renderCalc()" placeholder="0.00">
+          <label>Total Shipping Cost</label>
+          <input type="number" step="0.01" value="${p.shippingTotal}" oninput="upd('shippingTotal',this.value);renderCalc()" placeholder="0.00">
+        </div>
+        <div class="field">
+          <label>Number of Items</label>
+          <input type="number" step="1" value="${p.shippingItems}" oninput="upd('shippingItems',this.value);renderCalc()" placeholder="1">
         </div>
         <div class="field">
           <label>Import Duty Multiplier</label>
@@ -1114,6 +1098,12 @@ async function renderEditor(){
           <div class="help">Cost × this = landed cost. Update when actual customs invoice arrives.</div>
         </div>
       </div>
+      ${(parseFloat(p.shippingTotal)>0 && parseInt(p.shippingItems)>0) ? `
+        <div class="calc-box" style="margin-bottom:10px">
+          <span class="calc-label">Shipping / unit (${fmt(parseFloat(p.shippingTotal))} ÷ ${parseInt(p.shippingItems)} items)</span>
+          <span class="calc-value" style="font-size:18px">${fmt(parseFloat(p.shippingTotal)/parseInt(p.shippingItems))}</span>
+        </div>
+      ` : ''}
       <div id="calcArea"></div>
       <div class="field" style="margin-top:14px">
         <label>Retail Price (your selling price)</label>
@@ -1195,7 +1185,7 @@ async function renderImages(){
 function renderCalc(){
   const p = active(); if (!p) return;
   const cost = parseFloat(p.costPrice)||0;
-  const ship = parseFloat(p.shippingPerUnit)||0;
+  const ship = calcShipPerUnit(p);
   const mult = parseFloat(p.dutyMultiplier)||1.34;
   // Simple multiplier model: landed = (cost + shipping) × multiplier
   const landed = (cost + ship) * mult;
@@ -1726,7 +1716,7 @@ async function exportData(){
   const rows = [];
   for (const p of state.products){
     const cost = parseFloat(p.costPrice)||0;
-    const ship = parseFloat(p.shippingPerUnit)||0;
+    const ship = calcShipPerUnit(p);
     const mult = parseFloat(p.dutyMultiplier)||1.34;
     const landed = (cost + ship) * mult;
     const retail = parseFloat(p.retailPrice)||0;
@@ -1863,30 +1853,37 @@ async function renderTable(){
 
   const cols = [
     {k:'_row', label:'#', sortable:false, w:'30px'},
-    {k:'_thumb', label:'', sortable:false, w:'44px'},
+    {k:'_images', label:'Images', sortable:false, w:'140px'},
     {k:'code', label:'SKU', w:'110px'},
     {k:'name', label:'Name', w:'200px'},
     {k:'shortDescription', label:'Short Desc', w:'200px'},
-    {k:'description', label:'Full Description', w:'280px'},
+    {k:'description', label:'Full Description', sortable:false, w:'280px'},
     {k:'sizes', label:'Sizes', sortable:false, w:'120px'},
     {k:'colours', label:'Colours', sortable:false, w:'100px'},
     {k:'totalStock', label:'Stock', w:'60px'},
     {k:'costPrice', label:'Wholesale', w:'90px'},
-    {k:'dutyMultiplier', label:'Duty ×', w:'70px'},
+    {k:'dutyMultiplier', label:'Duty x', w:'70px'},
     {k:'landedCost', label:'Cost Price', w:'95px'},
     {k:'retailPrice', label:'Retail', w:'90px'},
     {k:'profit', label:'Profit', w:'90px'},
     {k:'category', label:'Category', w:'120px'},
-    {k:'_material', label:'Material', sortable:false, w:'100px'},
+    {k:'_material', label:'Material', sortable:false, w:'90px'},
+    {k:'_fit', label:'Fit', sortable:false, w:'80px'},
     {k:'_style', label:'Style', sortable:false, w:'80px'},
+    {k:'_season', label:'Season', sortable:false, w:'80px'},
+    {k:'_sleeve', label:'Sleeve', sortable:false, w:'80px'},
+    {k:'_collar', label:'Collar', sortable:false, w:'80px'},
+    {k:'_pattern', label:'Pattern', sortable:false, w:'80px'},
+    {k:'_length', label:'Length', sortable:false, w:'80px'},
+    {k:'_feature', label:'Feature', sortable:false, w:'90px'},
     {k:'supplierName', label:'Supplier', w:'100px'},
-    {k:'_status', label:'✓', sortable:false, w:'30px'},
+    {k:'_status', label:'OK', sortable:false, w:'30px'},
     {k:'_open', label:'', sortable:false, w:'50px'},
   ];
 
   const thHtml = cols.map(c => {
     const active = state.tableSort.col === c.k ? ' sort-active' : '';
-    const arrow = state.tableSort.col === c.k ? (state.tableSort.dir === 'asc' ? ' ▲' : ' ▼') : '';
+    const arrow = state.tableSort.col === c.k ? (state.tableSort.dir === 'asc' ? ' A' : ' V') : '';
     const click = c.sortable !== false ? `onclick="sortTable('${c.k}')"` : '';
     return `<th class="${active}" ${click} style="min-width:${c.w}">${c.label}${arrow}</th>`;
   }).join('');
@@ -1894,49 +1891,57 @@ async function renderTable(){
   const tbHtml = sorted.map((p, i) => {
     const cost = parseFloat(p.costPrice)||0;
     const mult = parseFloat(p.dutyMultiplier)||1.34;
-    const ship = parseFloat(p.shippingPerUnit)||0;
+    const ship = calcShipPerUnit(p);
     const landed = (cost + ship) * mult;
     const retail = parseFloat(p.retailPrice)||0;
     const profit = retail - landed;
     const margin = retail > 0 ? ((profit / retail) * 100) : 0;
     const totalStock = calcTotalStock(p);
-    const sizesStr = Object.entries(p.stockBySize||{}).filter(([,q])=>parseInt(q)>0).map(([s,q])=>`${q}×${s}`).join(', ') || p.sizes.join(', ');
+    const sizesStr = Object.entries(p.stockBySize||{}).filter(([,q])=>parseInt(q)>0).map(([s,q])=>`${q}x${s}`).join(', ') || p.sizes.join(', ');
     const profitColor = profit > 0 ? (margin >= 40 ? 'var(--good)' : 'var(--warn)') : '#f87171';
+    const sp = p.specs||{};
+    const allImgs = [...new Set([...(p.slot1ImageIds||[]), ...(p.slot2ImageIds||[]), ...(p.galleryImageIds||[]), ...(p.imageIds||[])])];
 
     return `<tr>
-      <td class="row-num">${i+1}</td>
-      <td class="thumb-cell"><div class="row-thumb" id="rowthumb-${p.id}" style="cursor:pointer" onclick="openLightboxFromId('${(p.slot1ImageIds&&p.slot1ImageIds[0])||(p.imageIds&&p.imageIds[0])||''}')"></div></td>
+      <td class="row-num" style="vertical-align:middle">${i+1}</td>
+      <td><div class="table-img-strip" id="imgstrip-${p.id}">${allImgs.map(id=>`<div class="timg" id="timg-${p.id}-${id}" onclick="openLightboxFromId('${id}')"></div>`).join('')}${allImgs.length===0?'<span style="font-size:10px;color:var(--muted)">-</span>':''}</div></td>
       <td><input value="${escapeAttr(p.code)}" oninput="updField('${p.id}','code',this.value)" placeholder="SKU" style="width:100px"></td>
       <td><input value="${escapeAttr(p.name)}" oninput="updField('${p.id}','name',this.value)" style="min-width:180px"></td>
       <td><input value="${escapeAttr(p.shortDescription)}" oninput="updField('${p.id}','shortDescription',this.value)" style="min-width:180px"></td>
-      <td><input value="${escapeAttr(p.description)}" oninput="updField('${p.id}','description',this.value)" style="min-width:260px" title="${escapeAttr(p.description)}"></td>
-      <td style="font-size:10px;color:var(--muted)">${escapeHtml(sizesStr)}</td>
-      <td style="font-size:10px;color:var(--muted)">${escapeHtml(p.colours.join(', '))}</td>
-      <td style="text-align:center;font-weight:600;color:var(--pink)">${totalStock||''}</td>
+      <td><textarea oninput="updField('${p.id}','description',this.value)" placeholder="Full description...">${escapeHtml(p.description||'')}</textarea></td>
+      <td style="font-size:10px">${escapeHtml(sizesStr)}</td>
+      <td style="font-size:10px">${escapeHtml(p.colours.join(', '))}</td>
+      <td style="text-align:center;font-weight:600;color:var(--pink);vertical-align:middle">${totalStock||''}</td>
       <td><input type="number" step="0.01" value="${p.costPrice}" oninput="updField('${p.id}','costPrice',this.value);renderTable()" style="width:80px"></td>
       <td><input type="number" step="0.01" value="${p.dutyMultiplier||'1.34'}" oninput="updField('${p.id}','dutyMultiplier',this.value);renderTable()" style="width:60px"></td>
-      <td class="cell-formula" title="= Wholesale × Duty">${landed ? fmt(landed) : ''}</td>
+      <td class="cell-formula" title="= Wholesale x Duty">${landed ? fmt(landed) : ''}</td>
       <td><input type="number" step="0.01" value="${p.retailPrice}" oninput="updField('${p.id}','retailPrice',this.value);renderTable()" style="width:80px"></td>
-      <td class="cell-formula" style="color:${profitColor}" title="= Retail − Cost Price (${margin.toFixed(0)}% margin)">${retail ? fmt(profit) : ''}</td>
+      <td class="cell-formula" style="color:${profitColor}" title="= Retail - Cost (${margin.toFixed(0)}% margin)">${retail ? fmt(profit) : ''}</td>
       <td><input value="${escapeAttr(p.category)}" oninput="updField('${p.id}','category',this.value)" style="width:110px"></td>
-      <td style="font-size:10px;color:var(--muted)">${escapeHtml(p.specs?.material||'')}</td>
-      <td style="font-size:10px;color:var(--muted)">${escapeHtml(p.specs?.style||'')}</td>
+      <td style="font-size:10px">${escapeHtml(sp.material||'')}</td>
+      <td style="font-size:10px">${escapeHtml(sp.fit||'')}</td>
+      <td style="font-size:10px">${escapeHtml(sp.style||'')}</td>
+      <td style="font-size:10px">${escapeHtml(sp.season||'')}</td>
+      <td style="font-size:10px">${escapeHtml(sp.sleeve_length||'')}</td>
+      <td style="font-size:10px">${escapeHtml(sp.collar||'')}</td>
+      <td style="font-size:10px">${escapeHtml(sp.pattern_type||'')}</td>
+      <td style="font-size:10px">${escapeHtml(sp.length_category||'')}</td>
+      <td style="font-size:10px">${escapeHtml(sp.feature||'')}</td>
       <td><input value="${escapeAttr(p.supplierName)}" oninput="updField('${p.id}','supplierName',this.value)" style="width:90px"></td>
-      <td><div class="status-dot status-${statusOf(p)}" style="display:inline-block" title="${statusOf(p)}"></div></td>
-      <td><button class="small-action" onclick="state.activeId='${p.id}';toggleView()">→</button></td>
+      <td style="vertical-align:middle"><div class="status-dot status-${statusOf(p)}" style="display:inline-block" title="${statusOf(p)}"></div></td>
+      <td style="vertical-align:middle"><button class="small-action" onclick="state.activeId='${p.id}';toggleView()">-></button></td>
     </tr>`;
   }).join('');
 
-  // Summary calculations
   const totalProducts = state.products.length;
   const completeProducts = state.products.filter(p => statusOf(p) === 'complete').length;
   const totalStockAll = state.products.reduce((a,p) => a + calcTotalStock(p), 0);
 
   tv.innerHTML = `
     <div class="table-toolbar">
-      <span class="count">${totalProducts} products · ${completeProducts} complete · ${totalStockAll} total units</span>
+      <span class="count">${totalProducts} products - ${completeProducts} complete - ${totalStockAll} total units</span>
       <span style="flex:1"></span>
-      <button class="btn" onclick="exportFKStockList()" style="font-size:11px;padding:5px 10px">⬇ Export this view to XLSX</button>
+      <button class="btn" onclick="exportFKStockList()" style="font-size:11px;padding:5px 10px">Export this view to XLSX</button>
     </div>
     <div style="overflow:auto;flex:1">
       <table class="master">
@@ -1945,19 +1950,27 @@ async function renderTable(){
       </table>
     </div>
   `;
-  // Load thumbs async
   for (const p of sorted){
-    const imgId = (p.slot1ImageIds&&p.slot1ImageIds[0])||(p.imageIds&&p.imageIds[0]);
-    if (imgId){
-      const url = await loadImage(imgId);
-      const el = document.getElementById('rowthumb-'+p.id);
+    const allImgs = [...new Set([...(p.slot1ImageIds||[]), ...(p.slot2ImageIds||[]), ...(p.galleryImageIds||[]), ...(p.imageIds||[])])];
+    for (const id of allImgs){
+      const url = await loadImage(id);
+      const el = document.getElementById('timg-'+p.id+'-'+id);
       if (el && url) el.style.backgroundImage = `url(${url})`;
     }
   }
 }
 
+
 function calcTotalStock(p){ return Object.values(p.stockBySize||{}).reduce((a,b)=>a+(parseInt(b)||0),0); }
-function calcLanded(p){ return ((parseFloat(p.costPrice)||0)+(parseFloat(p.shippingPerUnit)||0))*(parseFloat(p.dutyMultiplier)||1.34); }
+function calcShipPerUnit(p){
+  // New fields: shippingTotal / shippingItems
+  const total = parseFloat(p.shippingTotal)||0;
+  const items = parseInt(p.shippingItems)||0;
+  if (total > 0 && items > 0) return total / items;
+  // Backward compat: old shippingPerUnit field
+  return parseFloat(p.shippingPerUnit)||0;
+}
+function calcLanded(p){ return ((parseFloat(p.costPrice)||0)+calcShipPerUnit(p))*(parseFloat(p.dutyMultiplier)||1.34); }
 function calcProfit(p){ return (parseFloat(p.retailPrice)||0) - calcLanded(p); }
 
 function renderScorecard(){
@@ -2266,7 +2279,7 @@ async function exportWooCommerce(){
   const rows = [];
   for (const p of state.products){
     const cost = parseFloat(p.costPrice)||0;
-    const ship = parseFloat(p.shippingPerUnit)||0;
+    const ship = calcShipPerUnit(p);
     const mult = parseFloat(p.dutyMultiplier)||1.34;
     const landed = (cost + ship) * mult;
     const codeSlug = (p.code||p.id).replace(/[^a-z0-9_-]/gi,'_');
@@ -2421,6 +2434,22 @@ function blobToDataUrl(blob){
 }
 
 // ============ INTAKE PIPELINE ============
+const CTA_PHRASES = [
+  "⚡ LET'S GO!!",
+  "🔥 HIT ME BITCH!!",
+  "💅 CLICK ME — OHHHH YEAH!!",
+  "🚀 LET'S DO IT!!",
+  "👑 SEND IT QUEEN!!",
+  "💎 SMASH THAT BUTTON!!",
+  "🦋 MAKE THE MAGIC HAPPEN!!",
+  "⚡ YAAAS — EXTRACT!!",
+  "🔥 DO THE DAMN THING!!",
+  "💪 ANCHOVIES FOR THE WIN!!",
+  "🎯 PULL THE TRIGGER!!",
+  "🤫 WATCH THIS...",
+];
+function randomCTA(){ return CTA_PHRASES[Math.floor(Math.random()*CTA_PHRASES.length)]; }
+
 function renderSlot(p, n, label, hint){
   const imgIds = p['slot'+n+'ImageIds'] || [];
   const status = p['slot'+n+'Status'] || 'empty';
