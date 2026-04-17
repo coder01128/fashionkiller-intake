@@ -19,7 +19,7 @@
     --warn:#f59e0b;
   }
   body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);height:100vh;overflow:hidden;font-size:13px}
-  #app{display:grid;grid-template-rows:56px 1fr;height:100vh}
+  #app{display:grid;grid-template-rows:56px 1fr auto;height:100vh}
   header{display:flex;align-items:center;gap:16px;padding:0 16px;background:var(--panel);border-bottom:1px solid var(--border)}
   .brand{font-family:'Bebas Neue';font-size:24px;letter-spacing:2px;color:var(--pink)}
   .progress{flex:1;display:flex;align-items:center;gap:12px}
@@ -146,6 +146,7 @@
   .score-tile .score-sub{font-size:10px;color:var(--muted)}
   .score-tile.highlight{border-color:var(--pink);background:rgba(255,0,110,.06)}
   .score-tile.highlight .score-val{color:var(--pink)}
+  #scorecard{background:var(--panel);border-top:2px solid var(--border);padding:12px 16px;overflow-x:auto}
   .api-cost-note{font-size:11px;color:var(--muted);margin-top:8px;padding:8px;background:var(--panel-2);border-radius:4px}
   /* Stock by size grid */
   .stock-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(95px,1fr));gap:10px}
@@ -249,6 +250,11 @@
   .motive-box .motive-close{background:var(--pink);border:none;color:#fff;padding:12px 32px;border-radius:8px;font-weight:600;cursor:pointer;font-family:inherit;font-size:14px;letter-spacing:1px}
   .motive-box .motive-close:hover{background:var(--pink-dim)}
   @keyframes fadeIn{from{opacity:0}to{opacity:1}}
+  /* Image lightbox */
+  .lightbox{position:fixed;inset:0;background:rgba(0,0,0,.9);display:flex;align-items:center;justify-content:center;z-index:600;cursor:zoom-out;animation:fadeIn .2s}
+  .lightbox img{max-width:90vw;max-height:85vh;border-radius:8px;box-shadow:0 0 40px rgba(0,0,0,.5);object-fit:contain}
+  .lightbox .lb-close{position:absolute;top:16px;right:20px;background:rgba(255,255,255,.15);border:none;color:#fff;width:36px;height:36px;border-radius:50%;font-size:20px;cursor:pointer;display:flex;align-items:center;justify-content:center}
+  .lightbox .lb-close:hover{background:var(--pink)}
   .sync-online{background:var(--good)}
   .sync-offline{background:var(--warn)}
   .sync-syncing{background:var(--pink);animation:syncPulse 1s infinite}
@@ -302,6 +308,7 @@
     <section id="editor"></section>
     <section id="tableView" style="display:none;flex-direction:column"></section>
   </main>
+  <div id="scorecard"></div>
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
@@ -895,7 +902,7 @@ async function addImagesFromFiles(files, target='product'){
 }
 
 // ============ RENDER ============
-function renderAll(){ renderList(); renderEditor(); renderProgress(); }
+function renderAll(){ renderList(); renderEditor(); renderProgress(); renderScorecard(); }
 
 function renderProgress(){
   const total = state.products.length;
@@ -1838,7 +1845,8 @@ async function renderTable(){
     {k:'_thumb', label:'', sortable:false, w:'44px'},
     {k:'code', label:'SKU', w:'110px'},
     {k:'name', label:'Name', w:'200px'},
-    {k:'shortDescription', label:'Description', w:'200px'},
+    {k:'shortDescription', label:'Short Desc', w:'200px'},
+    {k:'description', label:'Full Description', w:'280px'},
     {k:'sizes', label:'Sizes', sortable:false, w:'120px'},
     {k:'colours', label:'Colours', sortable:false, w:'100px'},
     {k:'totalStock', label:'Stock', w:'60px'},
@@ -1876,10 +1884,11 @@ async function renderTable(){
 
     return `<tr>
       <td class="row-num">${i+1}</td>
-      <td class="thumb-cell"><div class="row-thumb" id="rowthumb-${p.id}"></div></td>
+      <td class="thumb-cell"><div class="row-thumb" id="rowthumb-${p.id}" style="cursor:pointer" onclick="openLightboxFromId('${(p.slot1ImageIds&&p.slot1ImageIds[0])||(p.imageIds&&p.imageIds[0])||''}')"></div></td>
       <td><input value="${escapeAttr(p.code)}" oninput="updField('${p.id}','code',this.value)" placeholder="SKU" style="width:100px"></td>
       <td><input value="${escapeAttr(p.name)}" oninput="updField('${p.id}','name',this.value)" style="min-width:180px"></td>
       <td><input value="${escapeAttr(p.shortDescription)}" oninput="updField('${p.id}','shortDescription',this.value)" style="min-width:180px"></td>
+      <td><input value="${escapeAttr(p.description)}" oninput="updField('${p.id}','description',this.value)" style="min-width:260px" title="${escapeAttr(p.description)}"></td>
       <td style="font-size:10px;color:var(--muted)">${escapeHtml(sizesStr)}</td>
       <td style="font-size:10px;color:var(--muted)">${escapeHtml(p.colours.join(', '))}</td>
       <td style="text-align:center;font-weight:600;color:var(--pink)">${totalStock||''}</td>
@@ -1901,22 +1910,6 @@ async function renderTable(){
   const totalProducts = state.products.length;
   const completeProducts = state.products.filter(p => statusOf(p) === 'complete').length;
   const totalStockAll = state.products.reduce((a,p) => a + calcTotalStock(p), 0);
-  const totalWholesale = state.products.reduce((a,p) => a + (parseFloat(p.costPrice)||0), 0);
-  const totalRetail = state.products.reduce((a,p) => a + (parseFloat(p.retailPrice)||0), 0);
-  const totalLanded = state.products.reduce((a,p) => a + calcLanded(p), 0);
-  const totalProfit = totalRetail - totalLanded;
-  const avgMargin = totalRetail > 0 ? ((totalProfit / totalRetail) * 100) : 0;
-  const avgMarkup = totalLanded > 0 ? (totalRetail / totalLanded) : 0;
-  const avgRetailPerUnit = totalStockAll > 0 ? (totalRetail / totalStockAll) : 0;
-  const totalRetailValue = state.products.reduce((a,p) => {
-    const stock = calcTotalStock(p);
-    return a + stock * (parseFloat(p.retailPrice)||0);
-  }, 0);
-  const totalCostValue = state.products.reduce((a,p) => {
-    const stock = calcTotalStock(p);
-    return a + stock * calcLanded(p);
-  }, 0);
-  const totalProfitValue = totalRetailValue - totalCostValue;
 
   tv.innerHTML = `
     <div class="table-toolbar">
@@ -1929,50 +1922,6 @@ async function renderTable(){
         <thead><tr>${thHtml}</tr></thead>
         <tbody>${tbHtml}</tbody>
       </table>
-    </div>
-    <div class="table-summary">
-      <div class="scorecard">
-        <div class="score-tile">
-          <div class="score-label">Products</div>
-          <div class="score-val">${totalProducts}</div>
-          <div class="score-sub">${completeProducts} reviewed</div>
-        </div>
-        <div class="score-tile">
-          <div class="score-label">Total Units</div>
-          <div class="score-val">${totalStockAll}</div>
-          <div class="score-sub">across all sizes</div>
-        </div>
-        <div class="score-tile">
-          <div class="score-label">Total Wholesale</div>
-          <div class="score-val">${fmt(totalWholesale)}</div>
-          <div class="score-sub">before duty</div>
-        </div>
-        <div class="score-tile">
-          <div class="score-label">Total Landed Cost</div>
-          <div class="score-val">${fmt(totalLanded)}</div>
-          <div class="score-sub">wholesale × duty</div>
-        </div>
-        <div class="score-tile">
-          <div class="score-label">Total Retail</div>
-          <div class="score-val">${fmt(totalRetail)}</div>
-          <div class="score-sub">all products × 1 unit</div>
-        </div>
-        <div class="score-tile highlight">
-          <div class="score-label">Total Profit (per unit)</div>
-          <div class="score-val" style="color:${totalProfit>=0?'var(--good)':'#f87171'}">${fmt(totalProfit)}</div>
-          <div class="score-sub">${avgMargin.toFixed(1)}% avg margin · ${avgMarkup.toFixed(2)}× markup</div>
-        </div>
-        <div class="score-tile highlight">
-          <div class="score-label">Stock Retail Value</div>
-          <div class="score-val">${fmt(totalRetailValue)}</div>
-          <div class="score-sub">if all ${totalStockAll} units sell</div>
-        </div>
-        <div class="score-tile highlight">
-          <div class="score-label">Stock Profit Value</div>
-          <div class="score-val" style="color:${totalProfitValue>=0?'var(--good)':'#f87171'}">${fmt(totalProfitValue)}</div>
-          <div class="score-sub">total revenue − total cost</div>
-        </div>
-      </div>
     </div>
   `;
   // Load thumbs async
@@ -1989,6 +1938,76 @@ async function renderTable(){
 function calcTotalStock(p){ return Object.values(p.stockBySize||{}).reduce((a,b)=>a+(parseInt(b)||0),0); }
 function calcLanded(p){ return ((parseFloat(p.costPrice)||0)+(parseFloat(p.shippingPerUnit)||0))*(parseFloat(p.dutyMultiplier)||1.34); }
 function calcProfit(p){ return (parseFloat(p.retailPrice)||0) - calcLanded(p); }
+
+function renderScorecard(){
+  const el = document.getElementById('scorecard');
+  if (!el) return;
+  if (!state.products.length){
+    el.innerHTML = '';
+    return;
+  }
+  const totalProducts = state.products.length;
+  const completeProducts = state.products.filter(p => statusOf(p) === 'complete').length;
+  const totalStockAll = state.products.reduce((a,p) => a + calcTotalStock(p), 0);
+  const totalWholesale = state.products.reduce((a,p) => a + (parseFloat(p.costPrice)||0), 0);
+  const totalRetail = state.products.reduce((a,p) => a + (parseFloat(p.retailPrice)||0), 0);
+  const totalLanded = state.products.reduce((a,p) => a + calcLanded(p), 0);
+  const totalProfit = totalRetail - totalLanded;
+  const avgMargin = totalRetail > 0 ? ((totalProfit / totalRetail) * 100) : 0;
+  const avgMarkup = totalLanded > 0 ? (totalRetail / totalLanded) : 0;
+  const totalRetailValue = state.products.reduce((a,p) => {
+    const stock = calcTotalStock(p);
+    return a + stock * (parseFloat(p.retailPrice)||0);
+  }, 0);
+  const totalCostValue = state.products.reduce((a,p) => {
+    const stock = calcTotalStock(p);
+    return a + stock * calcLanded(p);
+  }, 0);
+  const totalProfitValue = totalRetailValue - totalCostValue;
+
+  el.innerHTML = `<div class="scorecard">
+    <div class="score-tile">
+      <div class="score-label">Products</div>
+      <div class="score-val">${totalProducts}</div>
+      <div class="score-sub">${completeProducts} reviewed</div>
+    </div>
+    <div class="score-tile">
+      <div class="score-label">Total Units</div>
+      <div class="score-val">${totalStockAll}</div>
+      <div class="score-sub">across all sizes</div>
+    </div>
+    <div class="score-tile">
+      <div class="score-label">Total Wholesale</div>
+      <div class="score-val">${fmt(totalWholesale)}</div>
+      <div class="score-sub">before duty</div>
+    </div>
+    <div class="score-tile">
+      <div class="score-label">Total Landed Cost</div>
+      <div class="score-val">${fmt(totalLanded)}</div>
+      <div class="score-sub">wholesale × duty</div>
+    </div>
+    <div class="score-tile">
+      <div class="score-label">Total Retail</div>
+      <div class="score-val">${fmt(totalRetail)}</div>
+      <div class="score-sub">all products × 1 unit</div>
+    </div>
+    <div class="score-tile highlight">
+      <div class="score-label">Total Profit (per unit)</div>
+      <div class="score-val" style="color:${totalProfit>=0?'var(--good)':'#f87171'}">${fmt(totalProfit)}</div>
+      <div class="score-sub">${avgMargin.toFixed(1)}% avg margin · ${avgMarkup.toFixed(2)}× markup</div>
+    </div>
+    <div class="score-tile highlight">
+      <div class="score-label">Stock Retail Value</div>
+      <div class="score-val">${fmt(totalRetailValue)}</div>
+      <div class="score-sub">if all ${totalStockAll} units sell</div>
+    </div>
+    <div class="score-tile highlight">
+      <div class="score-label">Stock Profit Value</div>
+      <div class="score-val" style="color:${totalProfitValue>=0?'var(--good)':'#f87171'}">${fmt(totalProfitValue)}</div>
+      <div class="score-sub">total revenue − total cost</div>
+    </div>
+  </div>`;
+}
 function sortTable(col){
   if (state.tableSort.col === col) state.tableSort.dir = state.tableSort.dir==='asc' ? 'desc' : 'asc';
   else { state.tableSort.col = col; state.tableSort.dir = 'asc'; }
@@ -2000,6 +2019,7 @@ function updField(id, field, val){
   p[field] = val;
   saveProduct(p);
   renderProgress();
+  renderScorecard();
 }
 
 // ============ SMART IMPORT (Claude API) ============
@@ -2420,7 +2440,7 @@ async function renderSlotThumbs(p){
       const div = document.createElement('div');
       div.className = 'slot-thumb';
       div.style.backgroundImage = `url(${url})`;
-      div.onclick = e => { e.stopPropagation(); window.open(url, '_blank'); };
+      div.onclick = e => { e.stopPropagation(); openLightbox(url); };
       div.innerHTML = `<button class="del" onclick="event.stopPropagation();removeSlotImage(${n},'${id}')">×</button>`;
       grid.appendChild(div);
     }
@@ -2739,6 +2759,19 @@ function updSizing(rowIdx, key, val){
   if (!p.sizingChartData[rowIdx]) return;
   p.sizingChartData[rowIdx][key] = isNaN(parseFloat(val)) ? val : parseFloat(val);
   saveProduct(p);
+}
+
+// ============ IMAGE LIGHTBOX ============
+function openLightbox(imgSrc){
+  const lb = document.createElement('div');
+  lb.className = 'lightbox';
+  lb.innerHTML = `<button class="lb-close" onclick="event.stopPropagation();this.closest('.lightbox').remove()">×</button><img src="${imgSrc}">`;
+  lb.addEventListener('click', e => { if (e.target === lb) lb.remove(); });
+  document.body.appendChild(lb);
+}
+async function openLightboxFromId(imgId){
+  const url = await loadImage(imgId);
+  if (url) openLightbox(url);
 }
 
 // ============ MOTIVATIONAL QUOTES ============
