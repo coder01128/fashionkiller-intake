@@ -137,8 +137,15 @@
   table.master .row-num{color:var(--muted);font-size:10px;text-align:center;width:30px;padding:4px}
   .table-toolbar{display:flex;align-items:center;gap:8px;padding:8px 12px;background:var(--panel);border-bottom:1px solid var(--border);position:sticky;top:0;z-index:3}
   .table-toolbar .count{font-size:11px;color:var(--muted)}
-  .table-summary{display:flex;gap:16px;padding:8px 12px;background:var(--panel);border-top:1px solid var(--border);font-size:11px;color:var(--muted);position:sticky;bottom:0}
+  .table-summary{padding:12px 16px;background:var(--panel);border-top:2px solid var(--border)}
   .table-summary b{color:var(--pink)}
+  .scorecard{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}
+  .score-tile{background:var(--panel-2);border:1px solid var(--border);border-radius:8px;padding:12px 14px;display:flex;flex-direction:column;gap:4px}
+  .score-tile .score-label{font-size:9px;text-transform:uppercase;letter-spacing:1px;color:var(--muted);font-weight:600}
+  .score-tile .score-val{font-family:'Bebas Neue';font-size:24px;letter-spacing:1px;color:var(--text)}
+  .score-tile .score-sub{font-size:10px;color:var(--muted)}
+  .score-tile.highlight{border-color:var(--pink);background:rgba(255,0,110,.06)}
+  .score-tile.highlight .score-val{color:var(--pink)}
   .api-cost-note{font-size:11px;color:var(--muted);margin-top:8px;padding:8px;background:var(--panel-2);border-radius:4px}
   /* Stock by size grid */
   .stock-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(95px,1fr));gap:10px}
@@ -1178,7 +1185,7 @@ function renderCalc(){
     <div class="calc-box" style="margin-top:8px">
       <span class="calc-label">Suggested Retail (${state.settings.targetMarginPct}% margin)</span>
       <span class="calc-value" style="color:var(--text);font-size:18px">${fmt(suggested)}</span>
-      <button class="small-action" onclick="useSuggested(${suggested.toFixed(2)})">Use this</button>
+      <button class="btn btn-primary" onclick="useSuggested(${suggested.toFixed(2)})" style="padding:8px 20px;font-size:13px">✓ Use this price</button>
     </div>
   `;
   const m = document.getElementById('marginArea');
@@ -1892,15 +1899,28 @@ async function renderTable(){
 
   // Summary calculations
   const totalProducts = state.products.length;
+  const completeProducts = state.products.filter(p => statusOf(p) === 'complete').length;
   const totalStockAll = state.products.reduce((a,p) => a + calcTotalStock(p), 0);
   const totalWholesale = state.products.reduce((a,p) => a + (parseFloat(p.costPrice)||0), 0);
   const totalRetail = state.products.reduce((a,p) => a + (parseFloat(p.retailPrice)||0), 0);
   const totalLanded = state.products.reduce((a,p) => a + calcLanded(p), 0);
   const totalProfit = totalRetail - totalLanded;
+  const avgMargin = totalRetail > 0 ? ((totalProfit / totalRetail) * 100) : 0;
+  const avgMarkup = totalLanded > 0 ? (totalRetail / totalLanded) : 0;
+  const avgRetailPerUnit = totalStockAll > 0 ? (totalRetail / totalStockAll) : 0;
+  const totalRetailValue = state.products.reduce((a,p) => {
+    const stock = calcTotalStock(p);
+    return a + stock * (parseFloat(p.retailPrice)||0);
+  }, 0);
+  const totalCostValue = state.products.reduce((a,p) => {
+    const stock = calcTotalStock(p);
+    return a + stock * calcLanded(p);
+  }, 0);
+  const totalProfitValue = totalRetailValue - totalCostValue;
 
   tv.innerHTML = `
     <div class="table-toolbar">
-      <span class="count">${totalProducts} products</span>
+      <span class="count">${totalProducts} products · ${completeProducts} complete · ${totalStockAll} total units</span>
       <span style="flex:1"></span>
       <button class="btn" onclick="exportFKStockList()" style="font-size:11px;padding:5px 10px">⬇ Export this view to XLSX</button>
     </div>
@@ -1911,11 +1931,48 @@ async function renderTable(){
       </table>
     </div>
     <div class="table-summary">
-      <span>Total units: <b>${totalStockAll}</b></span>
-      <span>Total wholesale: <b>${fmt(totalWholesale)}</b></span>
-      <span>Total landed: <b>${fmt(totalLanded)}</b></span>
-      <span>Total retail: <b>${fmt(totalRetail)}</b></span>
-      <span>Total profit: <b style="color:${totalProfit>=0?'var(--good)':'#f87171'}">${fmt(totalProfit)}</b></span>
+      <div class="scorecard">
+        <div class="score-tile">
+          <div class="score-label">Products</div>
+          <div class="score-val">${totalProducts}</div>
+          <div class="score-sub">${completeProducts} reviewed</div>
+        </div>
+        <div class="score-tile">
+          <div class="score-label">Total Units</div>
+          <div class="score-val">${totalStockAll}</div>
+          <div class="score-sub">across all sizes</div>
+        </div>
+        <div class="score-tile">
+          <div class="score-label">Total Wholesale</div>
+          <div class="score-val">${fmt(totalWholesale)}</div>
+          <div class="score-sub">before duty</div>
+        </div>
+        <div class="score-tile">
+          <div class="score-label">Total Landed Cost</div>
+          <div class="score-val">${fmt(totalLanded)}</div>
+          <div class="score-sub">wholesale × duty</div>
+        </div>
+        <div class="score-tile">
+          <div class="score-label">Total Retail</div>
+          <div class="score-val">${fmt(totalRetail)}</div>
+          <div class="score-sub">all products × 1 unit</div>
+        </div>
+        <div class="score-tile highlight">
+          <div class="score-label">Total Profit (per unit)</div>
+          <div class="score-val" style="color:${totalProfit>=0?'var(--good)':'#f87171'}">${fmt(totalProfit)}</div>
+          <div class="score-sub">${avgMargin.toFixed(1)}% avg margin · ${avgMarkup.toFixed(2)}× markup</div>
+        </div>
+        <div class="score-tile highlight">
+          <div class="score-label">Stock Retail Value</div>
+          <div class="score-val">${fmt(totalRetailValue)}</div>
+          <div class="score-sub">if all ${totalStockAll} units sell</div>
+        </div>
+        <div class="score-tile highlight">
+          <div class="score-label">Stock Profit Value</div>
+          <div class="score-val" style="color:${totalProfitValue>=0?'var(--good)':'#f87171'}">${fmt(totalProfitValue)}</div>
+          <div class="score-sub">total revenue − total cost</div>
+        </div>
+      </div>
     </div>
   `;
   // Load thumbs async
