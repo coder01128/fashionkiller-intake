@@ -266,8 +266,10 @@
   <div class="login-box">
     <div class="brand">FASHIONKILLER</div>
     <div class="sub">Product Intake System</div>
-    <input id="loginEmail" type="email" placeholder="Enter your email" onkeydown="if(event.key==='Enter')doLogin()">
-    <button class="login-btn" id="loginBtn" onclick="doLogin()">Sign in with email</button>
+    <input id="loginEmail" type="email" placeholder="Email address" onkeydown="if(event.key==='Enter')document.getElementById('loginPass').focus()">
+    <input id="loginPass" type="password" placeholder="Password" style="margin-top:4px" onkeydown="if(event.key==='Enter')doLogin()">
+    <button class="login-btn" id="loginBtn" onclick="doLogin()">Sign In</button>
+    <button class="login-btn" id="signupBtn" onclick="doSignup()" style="background:var(--panel-2);color:var(--text);border:1px solid var(--border);margin-top:0">Create Account</button>
     <div class="login-msg" id="loginMsg"></div>
     <div class="skip" onclick="skipLogin()">Continue without account (offline only)</div>
   </div>
@@ -363,48 +365,67 @@ function initSupabase(){
 // ============ AUTH ============
 async function doLogin(){
   const email = document.getElementById('loginEmail').value.trim();
+  const pass = document.getElementById('loginPass').value;
   const msg = document.getElementById('loginMsg');
   const btn = document.getElementById('loginBtn');
   if (!email || !email.includes('@')){ msg.textContent = 'Enter a valid email'; msg.className = 'login-msg err'; return; }
-  if (!sb){ msg.textContent = 'Supabase not loaded. Check connection.'; msg.className = 'login-msg err'; return; }
+  if (!pass || pass.length < 6){ msg.textContent = 'Password must be at least 6 characters'; msg.className = 'login-msg err'; return; }
+  if (!sb){ msg.textContent = 'Cloud service not loaded. Try offline mode.'; msg.className = 'login-msg err'; return; }
   btn.disabled = true;
-  btn.textContent = 'Sending...';
+  btn.textContent = 'Signing in...';
   msg.textContent = '';
   try {
-    // Try password-less sign up/in with OTP
-    const { error } = await sb.auth.signInWithOtp({
-      email,
-      options: { shouldCreateUser: true }
-    });
+    const { data, error } = await sb.auth.signInWithPassword({ email, password: pass });
     if (error) throw error;
-    msg.textContent = '✓ Check your email for a login link!';
-    msg.className = 'login-msg ok';
-    btn.textContent = 'Check your email';
-    // Start polling for session (user clicked magic link in another tab)
-    pollForSession();
+    sbUser = data.user;
+    document.getElementById('loginScreen').style.display = 'none';
+    document.getElementById('app').style.display = '';
+    updateSyncBadge('synced');
+    loadAll();
+    setTimeout(showMotivationalQuote, 500);
   } catch(e){
-    msg.textContent = e.message || 'Login failed';
+    msg.textContent = e.message || 'Sign in failed';
     msg.className = 'login-msg err';
     btn.disabled = false;
-    btn.textContent = 'Sign in with email';
+    btn.textContent = 'Sign In';
   }
 }
 
-function pollForSession(){
-  const poll = setInterval(async () => {
-    const { data: { session } } = await sb.auth.getSession();
-    if (session?.user) {
-      clearInterval(poll);
-      sbUser = session.user;
+async function doSignup(){
+  const email = document.getElementById('loginEmail').value.trim();
+  const pass = document.getElementById('loginPass').value;
+  const msg = document.getElementById('loginMsg');
+  const btn = document.getElementById('signupBtn');
+  if (!email || !email.includes('@')){ msg.textContent = 'Enter a valid email'; msg.className = 'login-msg err'; return; }
+  if (!pass || pass.length < 6){ msg.textContent = 'Password must be at least 6 characters'; msg.className = 'login-msg err'; return; }
+  if (!sb){ msg.textContent = 'Cloud service not loaded. Try offline mode.'; msg.className = 'login-msg err'; return; }
+  btn.disabled = true;
+  btn.textContent = 'Creating account...';
+  msg.textContent = '';
+  try {
+    const { data, error } = await sb.auth.signUp({ email, password: pass });
+    if (error) throw error;
+    // If email confirmation is disabled, user is immediately signed in
+    if (data.user && data.session) {
+      sbUser = data.user;
       document.getElementById('loginScreen').style.display = 'none';
       document.getElementById('app').style.display = '';
       updateSyncBadge('synced');
       loadAll();
       setTimeout(showMotivationalQuote, 500);
+    } else {
+      // Email confirmation is required — tell user to check email
+      msg.textContent = '✓ Account created! Check your email to confirm, then sign in.';
+      msg.className = 'login-msg ok';
+      btn.disabled = false;
+      btn.textContent = 'Create Account';
     }
-  }, 2000);
-  // Stop polling after 5 minutes
-  setTimeout(() => clearInterval(poll), 5 * 60 * 1000);
+  } catch(e){
+    msg.textContent = e.message || 'Signup failed';
+    msg.className = 'login-msg err';
+    btn.disabled = false;
+    btn.textContent = 'Create Account';
+  }
 }
 
 function skipLogin(){
