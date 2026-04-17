@@ -757,8 +757,8 @@ async function saveProduct(p){
   showSaved();
   state.savesSinceBackup++;
   if (state.savesSinceBackup >= 50) checkBackupReminder();
-  // Queue cloud sync (debounced)
   queueSync(p.id);
+  renderScorecard();
 }
 function checkBackupReminder(){
   state.savesSinceBackup = 0;
@@ -1302,7 +1302,6 @@ function upd(field,val){
   p[field] = val;
   saveProduct(p);
   if (field==='name'||field==='code') renderList();
-  if (['costPrice','shippingPerUnit','dutyMultiplier','retailPrice','salePrice'].includes(field)) renderScorecard();
 }
 function toggleSize(s){
   const p = active();
@@ -1333,7 +1332,6 @@ function updStock(size, val){
   const total = Object.values(p.stockBySize).reduce((a,b)=>a+(parseInt(b)||0),0);
   document.querySelectorAll('.stock-total-val').forEach(el => el.textContent = total);
   document.querySelectorAll('.section input[disabled]').forEach(el => { if (el.style.color.includes('pink') || el.style.color.includes('255, 0, 110')) el.value = total; });
-  renderScorecard();
 }
 function addColour(v){
   v = v.trim(); if (!v) return;
@@ -2021,7 +2019,6 @@ function updField(id, field, val){
   p[field] = val;
   saveProduct(p);
   renderProgress();
-  renderScorecard();
 }
 
 // ============ SMART IMPORT (Claude API) ============
