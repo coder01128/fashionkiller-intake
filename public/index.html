@@ -1916,8 +1916,8 @@ async function renderTable(){
       <td class="row-num" style="vertical-align:middle">${i+1}</td>
       <td><div class="table-img-strip" id="imgstrip-${p.id}">${allImgs.map(id=>`<div class="timg" id="timg-${p.id}-${id}" onclick="openLightboxFromId('${id}')"></div>`).join('')}${allImgs.length===0?'<span style="font-size:10px;color:var(--muted)">-</span>':''}</div></td>
       <td><input value="${escapeAttr(p.code)}" oninput="updField('${p.id}','code',this.value)" placeholder="SKU" style="width:100px"></td>
-      <td><input value="${escapeAttr(p.name)}" oninput="updField('${p.id}','name',this.value)" style="min-width:180px"></td>
-      <td><input value="${escapeAttr(p.shortDescription)}" oninput="updField('${p.id}','shortDescription',this.value)" style="min-width:180px"></td>
+      <td><textarea oninput="updField('${p.id}','name',this.value)" style="min-width:180px;min-height:40px">${escapeHtml(p.name||'')}</textarea></td>
+      <td><textarea oninput="updField('${p.id}','shortDescription',this.value)" style="min-width:180px;min-height:40px">${escapeHtml(p.shortDescription||'')}</textarea></td>
       <td><textarea oninput="updField('${p.id}','description',this.value)" placeholder="Full description...">${escapeHtml(p.description||'')}</textarea></td>
       <td style="font-size:10px">${escapeHtml(sizesStr)}</td>
       <td style="font-size:10px">${escapeHtml(p.colours.join(', '))}</td>
@@ -2728,7 +2728,8 @@ async function applySlotResult(n, result){
   if (n === 1){
     if (result.name) p.name = result.name;
     if (result.shortDescription) p.shortDescription = result.shortDescription;
-    // Do NOT auto-fill full description — Dommie writes her own content here
+    // Explicitly keep full description empty — Dommie writes her own content here
+    p.description = '';
     if (result.keywords) p.keywords = result.keywords;
     if (result.tags) p.tags = result.tags;
     if (result.category) p.category = result.category;
@@ -2776,11 +2777,10 @@ function renderExtractedPreview(p){
   const hasData = p.name || Object.keys(p.specs||{}).length || (p.sizingChartData||[]).length;
   if (!hasData) return '';
   let html = '<div class="gallery-section"><div class="section-title" style="margin-bottom:10px">📊 Extracted Data <span style="font-size:11px;color:var(--muted);font-weight:400;text-transform:none;letter-spacing:0">— review and edit as needed</span></div>';
-  if (p.name || p.shortDescription || p.description){
+  if (p.name || p.shortDescription){
     html += `<div style="margin-bottom:14px">`;
     if (p.name) html += `<div style="font-family:'Bebas Neue';font-size:20px;letter-spacing:1px;color:var(--text);margin-bottom:4px">${escapeHtml(p.name)}</div>`;
     if (p.shortDescription) html += `<div style="font-style:italic;color:var(--muted);font-size:12px;margin-bottom:6px">${escapeHtml(p.shortDescription)}</div>`;
-    if (p.description) html += `<div style="font-size:12px;line-height:1.5">${escapeHtml(p.description)}</div>`;
     html += `</div>`;
   }
   if (Object.keys(p.specs||{}).length){
