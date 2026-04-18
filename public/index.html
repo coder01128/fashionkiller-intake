@@ -1520,140 +1520,96 @@ async function exportFKStockList(){
   const wb = new ExcelJS.Workbook();
   wb.creator = 'FashionKiller Intake';
   wb.created = new Date();
-  const ws = wb.addWorksheet('Sheet2');
+  const ws = wb.addWorksheet('Products');
 
-  // Columns — matching Dommie's layout (A-M) + extended specs columns (N-X)
-  // Her format: A=SKU, B=Name, C=Short Desc, D=Sizes, E=Retail, F=(skip),
-  //             G=Wholesale, H=Import Duty, I=Cost Price(formula), J=Profit(formula),
-  //             K=Supplier, L=(skip), M=Image
+  // Simplified columns as requested
   ws.columns = [
-    { header: 'SKU', key: 'sku', width: 16 },
-    { header: 'NAME OF PRODUCT', key: 'name', width: 32 },
-    { header: 'SHORT PRODUCT DESCRIPTION', key: 'desc', width: 34 },
+    { header: 'STOCK CODE / SKU', key: 'sku', width: 16 },
+    { header: 'IMAGES', key: 'images', width: 50 },
+    { header: 'PRODUCT NAME', key: 'name', width: 32 },
+    { header: 'SHORT DESCRIPTION', key: 'shortDesc', width: 34 },
     { header: 'FULL DESCRIPTION', key: 'fullDesc', width: 50 },
     { header: 'SIZES', key: 'sizes', width: 22 },
-    { header: 'RETAIL PRICE', key: 'retail', width: 16 },
-    { header: '', key: 'gap1', width: 2 },
-    { header: 'WHOLESALE PRICE', key: 'wholesale', width: 18 },
-    { header: 'IMPORT DUTY', key: 'duty', width: 14 },
-    { header: 'COST PRICE', key: 'cost', width: 16 },
-    { header: 'PROFIT', key: 'profit', width: 14 },
-    { header: 'SUPPLIER', key: 'supplier', width: 18 },
-    { header: '', key: 'gap2', width: 2 },
-    { header: 'IMAGE', key: 'image', width: 20 },
-    { header: 'SIZING CHART', key: 'sizingImg', width: 20 },
-    // Extended columns
-    { header: 'COLOURS', key: 'colours', width: 18 },
-    { header: 'CATEGORY', key: 'category', width: 18 },
-    { header: 'TAGS', key: 'tags', width: 24 },
-    { header: 'SEO KEYWORDS', key: 'keywords', width: 30 },
-    { header: 'MATERIAL', key: 'material', width: 14 },
-    { header: 'FIT', key: 'fit', width: 12 },
-    { header: 'STYLE', key: 'style', width: 12 },
-    { header: 'SEASON', key: 'season', width: 12 },
-    { header: 'SLEEVE', key: 'sleeve', width: 14 },
-    { header: 'COLLAR', key: 'collar', width: 14 },
-    { header: 'PATTERN', key: 'pattern', width: 12 },
-    { header: 'LENGTH', key: 'length_cat', width: 12 },
-    { header: 'FEATURE', key: 'feature', width: 14 },
-    { header: 'CARE', key: 'care', width: 24 },
-    { header: 'SUPPLIER URL', key: 'supplierUrl', width: 30 },
+    { header: 'COLOUR', key: 'colour', width: 18 },
+    { header: 'QUANTITY', key: 'qty', width: 12 },
+    { header: 'SELLING PRICE', key: 'price', width: 16 },
+    { header: 'SPECIFICATIONS', key: 'specs', width: 40 },
   ];
 
   // Style header row
   const headerRow = ws.getRow(1);
-  headerRow.font = { bold: true, size: 11 };
-  headerRow.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE4E4E4' } };
-  headerRow.height = 22;
-  headerRow.alignment = { vertical: 'middle', horizontal: 'center' };
+  headerRow.font = { bold: true, size: 11, color: { argb: 'FFFFFFFF' } };
+  headerRow.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1a1a1a' } };
+  headerRow.height = 28;
+  headerRow.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
 
   // Add product rows
   for (let i = 0; i < state.products.length; i++) {
     const p = state.products[i];
-    const rowNum = i + 2;  // Row 1 is header
-    const wholesale = parseFloat(p.costPrice) || 0;
-    const duty = parseFloat(p.dutyMultiplier) || 1.34;
+    const rowNum = i + 2;
 
-    // Build sizes string in her format: "1 x S, 2 x M"
+    // Build sizes string: "1 x S, 2 x M"
     const sizesStr = Object.entries(p.stockBySize||{})
       .filter(([,q]) => parseInt(q) > 0)
       .map(([s,q]) => `${q} x ${s}`)
       .join(', ') || p.sizes.join(', ');
 
+    // Total quantity
+    const totalQty = calcTotalStock(p);
+
+    // Build specs string: "Material: Cotton\nFit: Slim\nStyle: Casual"
+    const specLabels = {material:'Material', fit:'Fit', style:'Style', season:'Season', sleeve_length:'Sleeve', collar:'Collar', pattern_type:'Pattern', length_category:'Length', feature:'Feature'};
+    const specsStr = Object.entries(p.specs||{})
+      .filter(([,v]) => v)
+      .map(([k,v]) => `${specLabels[k]||k}: ${v}`)
+      .join('\n');
+    // Add care instructions if present
+    const fullSpecs = [specsStr, p.careInstructions ? `Care: ${p.careInstructions}` : ''].filter(Boolean).join('\n');
+
     const row = ws.addRow({
       sku: p.code,
+      images: '',
       name: p.name,
-      desc: p.shortDescription || '',
+      shortDesc: p.shortDescription || '',
       fullDesc: p.description || '',
       sizes: sizesStr,
-      retail: parseFloat(p.retailPrice) || null,  // retail is value from app, not formula
-      wholesale: wholesale,
-      duty: duty,
-      cost: null,   // will set formula below
-      profit: null, // will set formula below
-      supplier: p.supplierName,
-      image: '',
-      colours: p.colours.join(', '),
-      category: p.category,
-      tags: p.tags,
-      keywords: p.keywords,
-      material: p.specs?.material || '',
-      fit: p.specs?.fit || '',
-      style: p.specs?.style || '',
-      season: p.specs?.season || '',
-      sleeve: p.specs?.sleeve_length || '',
-      collar: p.specs?.collar || '',
-      pattern: p.specs?.pattern_type || '',
-      length_cat: p.specs?.length_category || '',
-      feature: p.specs?.feature || '',
-      care: p.careInstructions || '',
-      supplierUrl: p.supplierUrl,
+      colour: p.colours.join(', '),
+      qty: totalQty || '',
+      price: parseFloat(p.retailPrice) || null,
+      specs: fullSpecs,
     });
 
-    // Set formulas: Cost Price = Wholesale × Import Duty ; Profit = Retail - Cost
-    row.getCell('cost').value = { formula: `H${rowNum}*I${rowNum}`, result: wholesale * duty };
-    row.getCell('profit').value = { formula: `F${rowNum}-J${rowNum}`, result: (parseFloat(p.retailPrice)||0) - (wholesale * duty) };
+    // Currency format for price
+    row.getCell('price').numFmt = '#,##0.00';
 
-    // Currency format for price cells
-    ['retail', 'wholesale', 'cost', 'profit'].forEach(k => {
-      row.getCell(k).numFmt = '#,##0.00';
-    });
-    row.getCell('duty').numFmt = '0.00';
+    // Set row height to fit images
+    row.height = 90;
+    row.alignment = { vertical: 'top', wrapText: true };
 
-    row.height = 80;
-    row.alignment = { vertical: 'middle', wrapText: true };
-
-    // Embed first product image (from slot1 or legacy imageIds)
-    const imgIdToUse = (p.slot1ImageIds && p.slot1ImageIds[0]) || (p.imageIds && p.imageIds[0]);
-    if (imgIdToUse) {
+    // Embed ALL product images side by side in the Images column (B, index 1)
+    const allImgIds = [...new Set([
+      ...(p.slot1ImageIds||[]), ...(p.slot2ImageIds||[]),
+      ...(p.galleryImageIds||[]), ...(p.imageIds||[])
+    ])];
+    let imgOffset = 0;
+    for (const imgId of allImgIds) {
       try {
-        const dataUrl = await loadImage(imgIdToUse);
+        const dataUrl = await loadImage(imgId);
         if (dataUrl) {
           const b64 = dataUrl.split(',')[1];
-          const imgId = wb.addImage({ base64: b64, extension: 'jpeg' });
-          // Place image in column N (index 13), after FULL DESCRIPTION column was added
-          ws.addImage(imgId, {
-            tl: { col: 13.1, row: rowNum - 1 + 0.1 },
-            ext: { width: 100, height: 100 }
+          const excelImgId = wb.addImage({ base64: b64, extension: 'jpeg' });
+          ws.addImage(excelImgId, {
+            tl: { col: 1 + (imgOffset * 0.6) + 0.05, row: rowNum - 1 + 0.05 },
+            ext: { width: 75, height: 75 }
           });
+          imgOffset++;
         }
-      } catch (e) { console.warn('Image embed failed for product', p.code, e); }
+      } catch (e) { console.warn('Image embed failed:', p.code, imgId, e); }
     }
-
-    // Embed sizing chart image in column O (index 14), right after IMAGE
-    const sizingImgId = (p.slot2ImageIds && p.slot2ImageIds[0]) || p.sizingChartId;
-    if (sizingImgId) {
-      try {
-        const dataUrl = await loadImage(sizingImgId);
-        if (dataUrl) {
-          const b64 = dataUrl.split(',')[1];
-          const imgId = wb.addImage({ base64: b64, extension: 'jpeg' });
-          ws.addImage(imgId, {
-            tl: { col: 14.1, row: rowNum - 1 + 0.1 },
-            ext: { width: 100, height: 100 }
-          });
-        }
-      } catch (e) { console.warn('Sizing chart embed failed for product', p.code, e); }
+    // Widen images column if many images
+    if (allImgIds.length > 4) {
+      const neededWidth = allImgIds.length * 8;
+      if (neededWidth > ws.getColumn('images').width) ws.getColumn('images').width = neededWidth;
     }
   }
 
@@ -1662,7 +1618,6 @@ async function exportFKStockList(){
 
   // ============ SECOND WORKSHEET: Structured sizing chart data ============
   const wsSizing = wb.addWorksheet('Sizing Charts');
-  // Collect all unique measurement keys across all products so we build the right columns
   const allMeasureKeys = new Set();
   for (const p of state.products) {
     for (const row of (p.sizingChartData||[])) {
@@ -1671,7 +1626,6 @@ async function exportFKStockList(){
       });
     }
   }
-  // Preferred column order — common measurements first, rest alphabetical
   const orderedKeys = ['bust','chest','waist','hip','hips','length','sleeve','sleeve_length','shoulder','inseam','thigh','rise'];
   const measureCols = [
     ...orderedKeys.filter(k => allMeasureKeys.has(k)),
