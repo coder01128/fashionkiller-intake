@@ -274,6 +274,7 @@
     <button class="login-btn" id="loginBtn" onclick="doLogin()">Sign In</button>
     <button class="login-btn" id="signupBtn" onclick="doSignup()" style="background:var(--panel-2);color:var(--text);border:1px solid var(--border);margin-top:0">Create Account</button>
     <div class="login-msg" id="loginMsg"></div>
+    <div id="loginStatus" style="font-size:10px;color:var(--muted);margin-top:6px"></div>
     <div class="skip" onclick="skipLogin()">Continue without account (offline only)</div>
   </div>
 </div>
@@ -320,7 +321,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.3.0/exceljs.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js" async></script>
 <script>
 // ============ SUPABASE ============
 const SUPABASE_URL = 'https://fbinlujynlxrgnfeozux.supabase.co';
@@ -333,9 +334,11 @@ let syncQueue = [];  // Queue of product IDs to sync
 let syncTimer = null;
 
 function initSupabase(){
+  const statusEl = document.getElementById('loginStatus');
   if (typeof supabase !== 'undefined' && supabase.createClient) {
     sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
     console.log('[Supabase] Client initialized');
+    if (statusEl) statusEl.textContent = '🟢 Cloud connected';
     // Listen for auth changes
     sb.auth.onAuthStateChange((event, session) => {
       console.log('[Auth]', event, session?.user?.email);
@@ -362,6 +365,7 @@ function initSupabase(){
     });
     return true;
   }
+  if (statusEl) statusEl.textContent = '🔴 Cloud unavailable — use offline mode';
   return false;
 }
 
@@ -373,13 +377,14 @@ async function doLogin(){
   const btn = document.getElementById('loginBtn');
   if (!email || !email.includes('@')){ msg.textContent = 'Enter a valid email'; msg.className = 'login-msg err'; return; }
   if (!pass || pass.length < 6){ msg.textContent = 'Password must be at least 6 characters'; msg.className = 'login-msg err'; return; }
-  if (!sb){ msg.textContent = 'Cloud service not loaded. Try offline mode.'; msg.className = 'login-msg err'; return; }
+  if (!sb){ msg.textContent = '⚠ Cloud service not loaded. Click "Continue without account" below to use offline.'; msg.className = 'login-msg err'; return; }
   btn.disabled = true;
   btn.textContent = 'Signing in...';
   msg.textContent = '';
   try {
     const { data, error } = await sb.auth.signInWithPassword({ email, password: pass });
     if (error) throw error;
+    if (!data.user) throw new Error('No user returned');
     sbUser = data.user;
     document.getElementById('loginScreen').style.display = 'none';
     document.getElementById('app').style.display = '';
@@ -2844,30 +2849,62 @@ function showMotivationalQuote(){
 }
 
 // ============ INIT ============
-// Try to init Supabase. If user has active session, skip login screen.
-// Otherwise, show login screen and wait.
-(function boot(){
-  const hasSupabase = initSupabase();
-  if (!hasSupabase) {
-    // Supabase CDN didn't load — go offline
-    console.warn('[Boot] Supabase not available, running offline');
-    document.getElementById('loginScreen').style.display = 'none';
-    document.getElementById('app').style.display = '';
-    loadAll();
-    setTimeout(showMotivationalQuote, 500);
-  }
-  // If Supabase loaded, the auth state listener in initSupabase() handles
-  // showing/hiding login screen and calling loadAll().
-  // But we need to handle the case where there's no saved session:
-  if (hasSupabase) {
+// Boot the app. Supabase is optional — app MUST work without it.
+function bootApp(){
+  document.getElementById('loginScreen').style.display = 'none';
+  document.getElementById('app').style.display = '';
+  loadAll();
+  setTimeout(showMotivationalQuote, 500);
+}
+
+function trySupabaseBoot(){
+  try {
+    const ok = initSupabase();
+    if (!ok) {
+      console.warn('[Boot] Supabase not available, running offline');
+      updateSyncBadge('offline');
+      bootApp();
+      return;
+    }
     sb.auth.getSession().then(({data:{session}}) => {
-      if (!session) {
-        // No session — show login screen (it's already visible by default)
-        // User can click "Continue without account" to skip
+      if (session && session.user) {
+        sbUser = session.user;
+        updateSyncBadge('synced');
+        bootApp();
       }
+    }).catch(e => {
+      console.warn('[Boot] Session check failed:', e);
     });
+  } catch(e) {
+    console.warn('[Boot] Supabase init crashed:', e);
+    updateSyncBadge('offline');
+    bootApp();
   }
-})();
+}
+
+let booted = false;
+function attemptBoot(){
+  if (booted) return;
+  booted = true;
+  trySupabaseBoot();
+}
+
+if (typeof supabase !== 'undefined') {
+  attemptBoot();
+} else {
+  let checks = 0;
+  const poller = setInterval(() => {
+    checks++;
+    if (typeof supabase !== 'undefined') {
+      clearInterval(poller);
+      attemptBoot();
+    } else if (checks >= 30) {
+      clearInterval(poller);
+      console.warn('[Boot] Supabase CDN timeout, booting offline');
+      attemptBoot();
+    }
+  }, 100);
+}
 </script>
 </body>
 </html>
