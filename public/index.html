@@ -314,6 +314,7 @@
     <section id="editor"></section>
     <section id="tableView" style="display:none;flex-direction:column"></section>
   </main>
+  <div id="filterBar" style="background:var(--panel);border-top:1px solid var(--border);padding:8px 16px;display:flex;flex-wrap:wrap;gap:8px;align-items:center"></div>
   <div id="scorecard"></div>
 </div>
 
@@ -561,24 +562,29 @@ async function syncFromCloud(){
       return;
     }
     // Merge: cloud products not in local get added locally
+    // Dedup by BOTH id AND code (SKU) to prevent duplicates
     const localIds = new Set(state.products.map(p=>p.id));
+    const localCodes = new Set(state.products.map(p=>p.code).filter(Boolean));
     let added = 0;
     for (const row of cloudRows) {
-      if (!localIds.has(row.id)) {
-        const p = rowToProduct(row);
-        state.products.push(p);
-        await STORE.set('fk:p:'+p.id, JSON.stringify(p)).catch(()=>{});
-        // Download images from cloud to local
-        const allImgIds = [...new Set([
-          ...(p.slot1ImageIds||[]), ...(p.slot2ImageIds||[]),
-          ...(p.slot3ImageIds||[]), ...(p.galleryImageIds||[]),
-          ...(p.imageIds||[]), ...(p.sizingChartId?[p.sizingChartId]:[])
-        ])];
-        for (const imgId of allImgIds){
-          await downloadImageFromCloud(imgId);
-        }
-        added++;
+      // Skip if we already have this product by ID or by SKU
+      if (localIds.has(row.id)) continue;
+      if (row.code && localCodes.has(row.code)) continue;
+      const p = rowToProduct(row);
+      state.products.push(p);
+      localIds.add(p.id);
+      if (p.code) localCodes.add(p.code);
+      await STORE.set('fk:p:'+p.id, JSON.stringify(p)).catch(()=>{});
+      // Download images from cloud to local
+      const allImgIds = [...new Set([
+        ...(p.slot1ImageIds||[]), ...(p.slot2ImageIds||[]),
+        ...(p.slot3ImageIds||[]), ...(p.galleryImageIds||[]),
+        ...(p.imageIds||[]), ...(p.sizingChartId?[p.sizingChartId]:[])
+      ])];
+      for (const imgId of allImgIds){
+        await downloadImageFromCloud(imgId);
       }
+      added++;
     }
     if (added) {
       await saveMeta();
@@ -647,6 +653,7 @@ let state = {
   view: 'card',
   tableSort: {col:'name', dir:'asc'},
   sidebarWidth: 280,
+  filters: { category: '', status: '', colour: '' },
   settings: {
     dutyRate: 45,           // legacy, no longer used for calc
     vatRate: 15,            // legacy
@@ -744,10 +751,20 @@ async function loadAll(){
       state.settings = {...state.settings, ...(parsed.settings||{})};
       if (parsed.sidebarWidth) state.sidebarWidth = parsed.sidebarWidth;
       const ids = parsed.productIds || [];
+      const seenIds = new Set();
+      const seenCodes = new Set();
       for (const id of ids) {
+        if (seenIds.has(id)) continue;
         try {
           const p = await STORE.get('fk:p:'+id);
-          if (p) state.products.push(JSON.parse(p.value));
+          if (p) {
+            const product = JSON.parse(p.value);
+            // Skip duplicates by code
+            if (product.code && seenCodes.has(product.code)) continue;
+            seenIds.add(product.id);
+            if (product.code) seenCodes.add(product.code);
+            state.products.push(product);
+          }
         } catch(e){}
       }
     }
@@ -923,7 +940,7 @@ async function addImagesFromFiles(files, target='product'){
 }
 
 // ============ RENDER ============
-function renderAll(){ renderList(); renderEditor(); renderProgress(); renderScorecard(); }
+function renderAll(){ renderList(); renderEditor(); renderProgress(); renderFilterBar(); renderScorecard(); }
 
 function renderProgress(){
   const total = state.products.length;
@@ -1517,10 +1534,13 @@ async function exportFKStockList(){
   wb.created = new Date();
   const ws = wb.addWorksheet('Products');
 
-  // Simplified columns as requested
+  // Columns — images get 4 adjacent columns (B-E)
   ws.columns = [
     { header: 'STOCK CODE / SKU', key: 'sku', width: 16 },
-    { header: 'IMAGES', key: 'images', width: 50 },
+    { header: 'IMG 1', key: 'img1', width: 14 },
+    { header: 'IMG 2', key: 'img2', width: 14 },
+    { header: 'IMG 3', key: 'img3', width: 14 },
+    { header: 'IMG 4', key: 'img4', width: 14 },
     { header: 'PRODUCT NAME', key: 'name', width: 32 },
     { header: 'SHORT DESCRIPTION', key: 'shortDesc', width: 34 },
     { header: 'FULL DESCRIPTION', key: 'fullDesc', width: 50 },
@@ -1565,7 +1585,7 @@ async function exportFKStockList(){
 
     const row = ws.addRow({
       sku: p.code,
-      images: '',
+      img1: '', img2: '', img3: '', img4: '',
       name: p.name,
       shortDesc: p.shortDescription || '',
       fullDesc: p.description || '',
@@ -1585,40 +1605,28 @@ async function exportFKStockList(){
     row.height = 110;
     row.alignment = { vertical: 'top', wrapText: true };
 
-    // Embed product images stacked vertically in the Images column (B, index 1)
+    // Embed product images — one per cell in columns B(1), C(2), D(3), E(4)
     const productImgIds = [...new Set([
       ...(p.slot1ImageIds||[]),
       ...(p.galleryImageIds||[]),
     ])];
-    // Limit to max 4 images per product
     const imgIds = productImgIds.slice(0, 4);
-    const imgSize = 70;
-    const imgGap = 8;
-    const imgBlockHeight = imgIds.length * imgSize + (imgIds.length - 1) * imgGap + 16;
+    const imgSize = 80;
+    row.height = 70;
 
-    // Set row height FIRST so we can calculate fractional offsets correctly
-    if (imgIds.length > 0) {
-      row.height = Math.max(row.height, imgBlockHeight);
-    }
-    const rowPx = row.height * 1.333; // Excel points to pixels (approx)
-
-    let imgIdx = 0;
-    for (const imgId of imgIds) {
+    for (let imgIdx = 0; imgIdx < imgIds.length; imgIdx++) {
       try {
-        const dataUrl = await loadImage(imgId);
+        const dataUrl = await loadImage(imgIds[imgIdx]);
         if (dataUrl) {
           const b64 = dataUrl.split(',')[1];
           const excelImgId = wb.addImage({ base64: b64, extension: 'jpeg' });
-          // Calculate pixel position, then convert to row fraction
-          const pixelY = 8 + imgIdx * (imgSize + imgGap);
-          const rowFraction = pixelY / rowPx;
+          // Column index: B=1, C=2, D=3, E=4
           ws.addImage(excelImgId, {
-            tl: { col: 1.05, row: rowNum - 1 + rowFraction },
+            tl: { col: 1 + imgIdx + 0.05, row: rowNum - 1 + 0.05 },
             ext: { width: imgSize, height: imgSize }
           });
-          imgIdx++;
         }
-      } catch (e) { console.warn('Image embed failed:', p.code, imgId, e); }
+      } catch (e) { console.warn('Image embed failed:', p.code, e); }
     }
   }
 
@@ -1948,6 +1956,46 @@ function calcShipPerUnit(p){
 function calcLanded(p){ return ((parseFloat(p.costPrice)||0)+calcShipPerUnit(p))*(parseFloat(p.dutyMultiplier)||1.34); }
 function calcProfit(p){ return (parseFloat(p.retailPrice)||0) - calcLanded(p); }
 
+function getFilteredProducts(){
+  return state.products.filter(p => {
+    if (state.filters.category && (p.category||'').toLowerCase() !== state.filters.category.toLowerCase()) return false;
+    if (state.filters.status && statusOf(p) !== state.filters.status) return false;
+    if (state.filters.colour) {
+      const has = (p.colours||[]).some(c => c.toLowerCase().includes(state.filters.colour.toLowerCase()));
+      if (!has) return false;
+    }
+    return true;
+  });
+}
+
+function renderFilterBar(){
+  const bar = document.getElementById('filterBar');
+  if (!bar || !state.products.length) { if(bar) bar.innerHTML=''; return; }
+  // Collect unique values
+  const cats = [...new Set(state.products.map(p=>p.category).filter(Boolean))].sort();
+  const colours = [...new Set(state.products.flatMap(p=>p.colours||[]))].sort();
+  const statuses = ['empty','partial','complete'];
+  const filtered = getFilteredProducts();
+  const isFiltered = state.filters.category || state.filters.status || state.filters.colour;
+
+  bar.innerHTML = `
+    <span style="font-size:10px;text-transform:uppercase;letter-spacing:1px;color:var(--muted);font-weight:600">Filters:</span>
+    <select onchange="state.filters.category=this.value;renderAll()" style="background:var(--panel-2);border:1px solid var(--border);color:var(--text);padding:4px 8px;border-radius:4px;font-size:11px;font-family:inherit">
+      <option value="">All Categories</option>
+      ${cats.map(c=>`<option value="${escapeAttr(c)}" ${state.filters.category===c?'selected':''}>${escapeHtml(c)}</option>`).join('')}
+    </select>
+    <select onchange="state.filters.status=this.value;renderAll()" style="background:var(--panel-2);border:1px solid var(--border);color:var(--text);padding:4px 8px;border-radius:4px;font-size:11px;font-family:inherit">
+      <option value="">All Statuses</option>
+      ${statuses.map(s=>`<option value="${s}" ${state.filters.status===s?'selected':''}>${s.charAt(0).toUpperCase()+s.slice(1)}</option>`).join('')}
+    </select>
+    <select onchange="state.filters.colour=this.value;renderAll()" style="background:var(--panel-2);border:1px solid var(--border);color:var(--text);padding:4px 8px;border-radius:4px;font-size:11px;font-family:inherit">
+      <option value="">All Colours</option>
+      ${colours.map(c=>`<option value="${escapeAttr(c)}" ${state.filters.colour===c?'selected':''}>${escapeHtml(c)}</option>`).join('')}
+    </select>
+    ${isFiltered ? `<button onclick="state.filters={category:'',status:'',colour:''};renderAll()" style="background:var(--pink);border:none;color:#fff;padding:4px 10px;border-radius:4px;font-size:10px;cursor:pointer;font-family:inherit">✕ Clear (showing ${filtered.length}/${state.products.length})</button>` : `<span style="font-size:10px;color:var(--muted)">${state.products.length} products</span>`}
+  `;
+}
+
 function renderScorecard(){
   const el = document.getElementById('scorecard');
   if (!el) return;
@@ -1955,20 +2003,22 @@ function renderScorecard(){
     el.innerHTML = '';
     return;
   }
-  const totalProducts = state.products.length;
-  const completeProducts = state.products.filter(p => statusOf(p) === 'complete').length;
-  const totalStockAll = state.products.reduce((a,p) => a + calcTotalStock(p), 0);
-  const totalWholesale = state.products.reduce((a,p) => a + (parseFloat(p.costPrice)||0), 0);
-  const totalRetail = state.products.reduce((a,p) => a + (parseFloat(p.retailPrice)||0), 0);
-  const totalLanded = state.products.reduce((a,p) => a + calcLanded(p), 0);
+  const products = getFilteredProducts();
+  const isFiltered = state.filters.category || state.filters.status || state.filters.colour;
+  const totalProducts = products.length;
+  const completeProducts = products.filter(p => statusOf(p) === 'complete').length;
+  const totalStockAll = products.reduce((a,p) => a + calcTotalStock(p), 0);
+  const totalWholesale = products.reduce((a,p) => a + (parseFloat(p.costPrice)||0), 0);
+  const totalRetail = products.reduce((a,p) => a + (parseFloat(p.retailPrice)||0), 0);
+  const totalLanded = products.reduce((a,p) => a + calcLanded(p), 0);
   const totalProfit = totalRetail - totalLanded;
   const avgMargin = totalRetail > 0 ? ((totalProfit / totalRetail) * 100) : 0;
   const avgMarkup = totalLanded > 0 ? (totalRetail / totalLanded) : 0;
-  const totalRetailValue = state.products.reduce((a,p) => {
+  const totalRetailValue = products.reduce((a,p) => {
     const stock = calcTotalStock(p);
     return a + stock * (parseFloat(p.retailPrice)||0);
   }, 0);
-  const totalCostValue = state.products.reduce((a,p) => {
+  const totalCostValue = products.reduce((a,p) => {
     const stock = calcTotalStock(p);
     return a + stock * calcLanded(p);
   }, 0);
@@ -1976,8 +2026,8 @@ function renderScorecard(){
 
   el.innerHTML = `<div class="scorecard">
     <div class="score-tile">
-      <div class="score-label">Products</div>
-      <div class="score-val">${totalProducts}</div>
+      <div class="score-label">Products${isFiltered?' (filtered)':''}</div>
+      <div class="score-val">${totalProducts}${isFiltered?'<span style="font-size:12px;color:var(--muted)"> / '+state.products.length+'</span>':''}</div>
       <div class="score-sub">${completeProducts} reviewed</div>
     </div>
     <div class="score-tile">
