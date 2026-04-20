@@ -1593,16 +1593,18 @@ async function exportFKStockList(){
     row.height = 110;
     row.alignment = { vertical: 'top', wrapText: true };
 
-    // Embed ALL product images in the Images column (B, index 1)
-    // Stack in a grid: up to 3 per row, wrap to second row if more
-    const allImgIds = [...new Set([
-      ...(p.slot1ImageIds||[]), ...(p.slot2ImageIds||[]),
-      ...(p.galleryImageIds||[]), ...(p.imageIds||[])
+    // Embed product images only (slot1 = product hero, gallery = additional shots)
+    // Exclude slot2 (sizing chart) and slot3 (specs screenshot) — those aren't product photos
+    const productImgIds = [...new Set([
+      ...(p.slot1ImageIds||[]),
+      ...(p.galleryImageIds||[]),
     ])];
-    const imgSize = 65;
-    const imgsPerRow = 3;
+    // Limit to max 6 images to keep the spreadsheet manageable
+    const imgIds = productImgIds.slice(0, 6);
+    const imgSize = 60;
+    const imgsPerRow = 2;
     let imgIdx = 0;
-    for (const imgId of allImgIds) {
+    for (const imgId of imgIds) {
       try {
         const dataUrl = await loadImage(imgId);
         if (dataUrl) {
@@ -1611,7 +1613,7 @@ async function exportFKStockList(){
           const colInRow = imgIdx % imgsPerRow;
           const rowInGrid = Math.floor(imgIdx / imgsPerRow);
           ws.addImage(excelImgId, {
-            tl: { col: 1.02 + (colInRow * 0.32), row: rowNum - 1 + 0.05 + (rowInGrid * 0.48) },
+            tl: { col: 1.02 + (colInRow * 0.45), row: rowNum - 1 + 0.05 + (rowInGrid * 0.45) },
             ext: { width: imgSize, height: imgSize }
           });
           imgIdx++;
@@ -1619,8 +1621,8 @@ async function exportFKStockList(){
       } catch (e) { console.warn('Image embed failed:', p.code, imgId, e); }
     }
     // Increase row height if images wrap to multiple rows
-    const imgRows = Math.ceil(allImgIds.length / imgsPerRow);
-    if (imgRows > 1) row.height = Math.max(row.height, imgRows * 75);
+    const imgRows = Math.ceil(imgIds.length / imgsPerRow);
+    if (imgRows > 1) row.height = Math.max(row.height, imgRows * 70 + 20);
   }
 
   // Freeze header row
@@ -1874,7 +1876,7 @@ async function renderTable(){
     const sizesStr = Object.entries(p.stockBySize||{}).filter(([,q])=>parseInt(q)>0).map(([s,q])=>`${q}x${s}`).join(', ') || p.sizes.join(', ');
     const profitColor = profit > 0 ? (margin >= 40 ? 'var(--good)' : 'var(--warn)') : '#f87171';
     const sp = p.specs||{};
-    const allImgs = [...new Set([...(p.slot1ImageIds||[]), ...(p.slot2ImageIds||[]), ...(p.galleryImageIds||[]), ...(p.imageIds||[])])];
+    const allImgs = [...new Set([...(p.slot1ImageIds||[]), ...(p.galleryImageIds||[])])];
 
     return `<tr>
       <td class="row-num" style="vertical-align:middle">${i+1}</td>
@@ -1925,7 +1927,7 @@ async function renderTable(){
     </div>
   `;
   for (const p of sorted){
-    const allImgs = [...new Set([...(p.slot1ImageIds||[]), ...(p.slot2ImageIds||[]), ...(p.galleryImageIds||[]), ...(p.imageIds||[])])];
+    const allImgs = [...new Set([...(p.slot1ImageIds||[]), ...(p.galleryImageIds||[])])];
     for (const id of allImgs){
       const url = await loadImage(id);
       const el = document.getElementById('timg-'+p.id+'-'+id);
@@ -2702,10 +2704,6 @@ async function applySlotResult(n, result){
     // Do NOT auto-select sizes from Slot 1 — Dommie manually picks ordered sizes
     if (Array.isArray(result.colours) && result.colours.length) p.colours = result.colours;
     if (result.supplier_url) p.supplierUrl = result.supplier_url;
-    // Also copy first slot1 image to main imageIds if empty
-    if (p.imageIds.length === 0 && p.slot1ImageIds.length){
-      p.imageIds.push(p.slot1ImageIds[0]);
-    }
   } else if (n === 2){
     if (Array.isArray(result.rows)){
       p.sizingChartData = result.rows.map(r => ({size:r.size, units:result.units||'cm', ...r.measurements}));
