@@ -864,14 +864,14 @@ function newProduct(overrides={}){
 }
 
 function statusOf(p){
-  // Count completed slots (extracted or has manual data)
-  const slot1Done = p.slot1Status === 'extracted' || !!p.name;
-  const slot2Done = p.slot2Status === 'extracted' || p.sizes.length > 0;
-  const slot3Done = p.slot3Status === 'extracted' || Object.keys(p.specs||{}).length > 0;
-  const slotsDone = [slot1Done, slot2Done, slot3Done].filter(Boolean).length;
+  // For green: product must have name, code, price, stock, and be marked reviewed
+  const hasBasics = !!p.name && !!p.code;
+  const hasPrice = !!p.costPrice && !!p.retailPrice;
+  const hasStock = Object.values(p.stockBySize||{}).reduce((a,b)=>a+(parseInt(b)||0),0) > 0;
+  const hasImages = (p.slot1ImageIds||[]).length > 0 || (p.galleryImageIds||[]).length > 0;
 
-  if (slotsDone === 0 && !p.name && !p.code) return 'empty';
-  if (slotsDone === 3 && p.manualReviewDone && p.costPrice) return 'complete';
+  if (!hasBasics && !hasPrice && !hasStock && !hasImages) return 'empty';
+  if (hasBasics && hasPrice && hasStock && p.manualReviewDone) return 'complete';
   return 'partial';
 }
 
