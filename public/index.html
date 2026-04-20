@@ -31,7 +31,7 @@
   .btn-primary{background:var(--pink);border-color:var(--pink);color:#fff}
   .btn-primary:hover{background:var(--pink-dim);border-color:var(--pink-dim)}
   .btn-ghost{background:transparent}
-  main{display:grid;grid-template-columns:280px 1fr;overflow:hidden}
+  main{display:grid;grid-template-columns:280px 1fr 200px;overflow:hidden}
   #sidebar{background:var(--panel);border-right:1px solid var(--border);display:flex;flex-direction:column;overflow:hidden}
   .sidebar-head{padding:12px;border-bottom:1px solid var(--border);display:flex;flex-direction:column;gap:8px}
   .search{background:var(--panel-2);border:1px solid var(--border);color:var(--text);padding:7px 10px;border-radius:6px;font-size:12px;font-family:inherit;width:100%}
@@ -150,6 +150,18 @@
   .score-tile.highlight{border-color:var(--pink);background:rgba(255,0,110,.06)}
   .score-tile.highlight .score-val{color:var(--pink)}
   #scorecard{background:var(--panel);border-top:2px solid var(--border);padding:12px 16px;overflow-x:auto}
+  /* Right filter panel */
+  #filterPanel{background:var(--panel);border-left:1px solid var(--border);padding:12px;overflow-y:auto}
+  .fp-title{font-size:10px;text-transform:uppercase;letter-spacing:1.5px;color:var(--pink);font-weight:700;margin-bottom:8px;font-family:'Bebas Neue';font-size:14px}
+  .fp-group{margin-bottom:16px}
+  .fp-label{font-size:9px;text-transform:uppercase;letter-spacing:1px;color:var(--muted);font-weight:600;margin-bottom:6px}
+  .fp-chips{display:flex;flex-wrap:wrap;gap:4px}
+  .fp-chip{background:var(--panel-2);border:1px solid var(--border);padding:4px 8px;border-radius:12px;font-size:10px;cursor:pointer;color:var(--muted);transition:all .15s;white-space:nowrap}
+  .fp-chip:hover{border-color:var(--pink);color:var(--text)}
+  .fp-chip.active{background:var(--pink);border-color:var(--pink);color:#fff}
+  .fp-clear{background:transparent;border:1px solid var(--border);color:var(--muted);padding:4px 8px;border-radius:4px;font-size:9px;cursor:pointer;width:100%;margin-top:8px;font-family:inherit;text-transform:uppercase;letter-spacing:1px}
+  .fp-clear:hover{border-color:var(--pink);color:var(--pink)}
+  .fp-count{font-size:9px;color:var(--muted);margin-left:2px}
   .api-cost-note{font-size:11px;color:var(--muted);margin-top:8px;padding:8px;background:var(--panel-2);border-radius:4px}
   /* Stock by size grid */
   .stock-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(95px,1fr));gap:10px}
@@ -313,8 +325,8 @@
     </aside>
     <section id="editor"></section>
     <section id="tableView" style="display:none;flex-direction:column"></section>
+    <aside id="filterPanel"></aside>
   </main>
-  <div id="filterBar" style="background:var(--panel);border-top:1px solid var(--border);padding:8px 16px;display:flex;flex-wrap:wrap;gap:8px;align-items:center"></div>
   <div id="scorecard"></div>
 </div>
 
@@ -776,7 +788,7 @@ async function loadAll(){
 }
 
 function applySidebarWidth(){
-  document.querySelector('main').style.gridTemplateColumns = `${state.sidebarWidth}px 1fr`;
+  document.querySelector('main').style.gridTemplateColumns = `${state.sidebarWidth}px 1fr 200px`;
 }
 
 function initSidebarDrag(){
@@ -1969,31 +1981,66 @@ function getFilteredProducts(){
 }
 
 function renderFilterBar(){
-  const bar = document.getElementById('filterBar');
-  if (!bar || !state.products.length) { if(bar) bar.innerHTML=''; return; }
-  // Collect unique values
-  const cats = [...new Set(state.products.map(p=>p.category).filter(Boolean))].sort();
-  const colours = [...new Set(state.products.flatMap(p=>p.colours||[]))].sort();
-  const statuses = ['empty','partial','complete'];
-  const filtered = getFilteredProducts();
+  const panel = document.getElementById('filterPanel');
+  if (!panel || !state.products.length) { if(panel) panel.innerHTML=''; return; }
+
+  // Collect unique values with counts
+  const catCounts = {};
+  const colourCounts = {};
+  const statusCounts = {empty:0, partial:0, complete:0};
+  state.products.forEach(p => {
+    const cat = p.category || 'Uncategorised';
+    catCounts[cat] = (catCounts[cat]||0) + 1;
+    (p.colours||[]).forEach(c => { colourCounts[c] = (colourCounts[c]||0) + 1; });
+    statusCounts[statusOf(p)]++;
+  });
+
+  const cats = Object.keys(catCounts).sort();
+  const colours = Object.keys(colourCounts).sort();
   const isFiltered = state.filters.category || state.filters.status || state.filters.colour;
 
-  bar.innerHTML = `
-    <span style="font-size:10px;text-transform:uppercase;letter-spacing:1px;color:var(--muted);font-weight:600">Filters:</span>
-    <select onchange="state.filters.category=this.value;renderAll()" style="background:var(--panel-2);border:1px solid var(--border);color:var(--text);padding:4px 8px;border-radius:4px;font-size:11px;font-family:inherit">
-      <option value="">All Categories</option>
-      ${cats.map(c=>`<option value="${escapeAttr(c)}" ${state.filters.category===c?'selected':''}>${escapeHtml(c)}</option>`).join('')}
-    </select>
-    <select onchange="state.filters.status=this.value;renderAll()" style="background:var(--panel-2);border:1px solid var(--border);color:var(--text);padding:4px 8px;border-radius:4px;font-size:11px;font-family:inherit">
-      <option value="">All Statuses</option>
-      ${statuses.map(s=>`<option value="${s}" ${state.filters.status===s?'selected':''}>${s.charAt(0).toUpperCase()+s.slice(1)}</option>`).join('')}
-    </select>
-    <select onchange="state.filters.colour=this.value;renderAll()" style="background:var(--panel-2);border:1px solid var(--border);color:var(--text);padding:4px 8px;border-radius:4px;font-size:11px;font-family:inherit">
-      <option value="">All Colours</option>
-      ${colours.map(c=>`<option value="${escapeAttr(c)}" ${state.filters.colour===c?'selected':''}>${escapeHtml(c)}</option>`).join('')}
-    </select>
-    ${isFiltered ? `<button onclick="state.filters={category:'',status:'',colour:''};renderAll()" style="background:var(--pink);border:none;color:#fff;padding:4px 10px;border-radius:4px;font-size:10px;cursor:pointer;font-family:inherit">✕ Clear (showing ${filtered.length}/${state.products.length})</button>` : `<span style="font-size:10px;color:var(--muted)">${state.products.length} products</span>`}
-  `;
+  let html = '<div class="fp-title">Filters</div>';
+
+  // Status
+  html += '<div class="fp-group"><div class="fp-label">Status</div><div class="fp-chips">';
+  [{k:'complete',label:'✓ Done',color:'var(--good)'},{k:'partial',label:'⏳ WIP',color:'var(--warn)'},{k:'empty',label:'○ Empty',color:'var(--muted)'}].forEach(s => {
+    const active = state.filters.status === s.k ? ' active' : '';
+    html += '<div class="fp-chip'+active+'" onclick="toggleFilter(\'status\',\''+s.k+'\')">'+s.label+'<span class="fp-count">'+statusCounts[s.k]+'</span></div>';
+  });
+  html += '</div></div>';
+
+  // Categories
+  html += '<div class="fp-group"><div class="fp-label">Category</div><div class="fp-chips">';
+  cats.forEach(c => {
+    const active = state.filters.category === c ? ' active' : '';
+    const label = c.length > 15 ? c.slice(0,14)+'…' : c;
+    html += '<div class="fp-chip'+active+'" onclick="toggleFilter(\'category\',\''+escapeAttr(c)+'\')" title="'+escapeAttr(c)+'">'+escapeHtml(label)+'<span class="fp-count">'+catCounts[c]+'</span></div>';
+  });
+  html += '</div></div>';
+
+  // Colours
+  if (colours.length) {
+    html += '<div class="fp-group"><div class="fp-label">Colour</div><div class="fp-chips">';
+    colours.forEach(c => {
+      const active = state.filters.colour === c ? ' active' : '';
+      html += '<div class="fp-chip'+active+'" onclick="toggleFilter(\'colour\',\''+escapeAttr(c)+'\')">'+escapeHtml(c)+'<span class="fp-count">'+colourCounts[c]+'</span></div>';
+    });
+    html += '</div></div>';
+  }
+
+  // Clear button
+  if (isFiltered) {
+    const count = getFilteredProducts().length;
+    html += '<button class="fp-clear" onclick="state.filters={category:\'\',status:\'\',colour:\'\'};renderAll()">✕ Clear filters ('+count+'/'+state.products.length+')</button>';
+  }
+
+  panel.innerHTML = html;
+}
+
+function toggleFilter(key, val){
+  if (state.filters[key] === val) state.filters[key] = '';
+  else state.filters[key] = val;
+  renderAll();
 }
 
 function renderScorecard(){
