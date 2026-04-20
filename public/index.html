@@ -1593,31 +1593,34 @@ async function exportFKStockList(){
     row.height = 110;
     row.alignment = { vertical: 'top', wrapText: true };
 
-    // Embed ALL product images side by side in the Images column (B, index 1)
+    // Embed ALL product images in the Images column (B, index 1)
+    // Stack in a grid: up to 3 per row, wrap to second row if more
     const allImgIds = [...new Set([
       ...(p.slot1ImageIds||[]), ...(p.slot2ImageIds||[]),
       ...(p.galleryImageIds||[]), ...(p.imageIds||[])
     ])];
-    let imgOffset = 0;
+    const imgSize = 65;
+    const imgsPerRow = 3;
+    let imgIdx = 0;
     for (const imgId of allImgIds) {
       try {
         const dataUrl = await loadImage(imgId);
         if (dataUrl) {
           const b64 = dataUrl.split(',')[1];
           const excelImgId = wb.addImage({ base64: b64, extension: 'jpeg' });
+          const colInRow = imgIdx % imgsPerRow;
+          const rowInGrid = Math.floor(imgIdx / imgsPerRow);
           ws.addImage(excelImgId, {
-            tl: { col: 1.05 + (imgOffset * 0.75), row: rowNum - 1 + 0.08 },
-            ext: { width: 95, height: 95 }
+            tl: { col: 1.02 + (colInRow * 0.32), row: rowNum - 1 + 0.05 + (rowInGrid * 0.48) },
+            ext: { width: imgSize, height: imgSize }
           });
-          imgOffset++;
+          imgIdx++;
         }
       } catch (e) { console.warn('Image embed failed:', p.code, imgId, e); }
     }
-    // Widen images column if many images
-    if (allImgIds.length > 3) {
-      const neededWidth = Math.max(50, allImgIds.length * 10);
-      if (neededWidth > ws.getColumn('images').width) ws.getColumn('images').width = neededWidth;
-    }
+    // Increase row height if images wrap to multiple rows
+    const imgRows = Math.ceil(allImgIds.length / imgsPerRow);
+    if (imgRows > 1) row.height = Math.max(row.height, imgRows * 75);
   }
 
   // Freeze header row
