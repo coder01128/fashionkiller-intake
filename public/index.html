@@ -659,6 +659,21 @@ let state = {
 };
 
 const SIZES = ['XS','S','M','L','XL','XXL','XXXL'];
+const SHOE_SIZES = ['36','37','38','39','40','41'];
+const ACCESSORY_CATEGORIES = ['jewellery','jewelry','handbags','handbag','sunglasses','sun glasses','accessories','bags','watches','belts','hats','scarves'];
+
+function isShoeCategory(cat){
+  const c = (cat||'').toLowerCase();
+  return c.includes('shoe') || c.includes('boot') || c.includes('heel') || c.includes('sandal') || c.includes('sneaker') || c.includes('footwear') || c.includes('slipper');
+}
+function isAccessoryCategory(cat){
+  const c = (cat||'').toLowerCase();
+  return ACCESSORY_CATEGORIES.some(a => c.includes(a));
+}
+function getSizeChips(p){
+  if (isShoeCategory(p.category)) return SHOE_SIZES;
+  return SIZES;
+}
 
 // ============ STORAGE (window.storage if in artifact, else IndexedDB) ============
 const STORE = (function(){
@@ -1047,32 +1062,7 @@ async function renderEditor(){
       </div>
     </div>
 
-    <div class="section">
-      <div class="section-title">Sizes Ordered <button class="small-action" onclick="copyFromPrev('sizes')" ${idx===0?'disabled':''}>↑ Copy from previous</button></div>
-      ${(p.sizingChartData||[]).length ? `<div class="help" style="margin-bottom:8px">Detected in sizing chart: ${p.sizingChartData.map(r=>escapeHtml(r.size)).join(', ')} — click the chips below to select which you ordered</div>` : '<div class="help" style="margin-bottom:8px">Click to select the sizes you actually ordered</div>'}
-      <div class="chip-row">
-        ${SIZES.map(s=>`<div class="chip ${p.sizes.includes(s)?'active':''}" onclick="toggleSize('${s}')">${s}</div>`).join('')}
-        ${p.sizes.filter(s=>!SIZES.includes(s)).map(s=>`<div class="chip active removable" onclick="removeSize('${escapeAttr(s)}')">${escapeHtml(s)} <span class="x">×</span></div>`).join('')}
-        <input class="chip-input" placeholder="+ custom" onkeydown="if(event.key==='Enter'){addCustomSize(this.value);this.value=''}">
-      </div>
-      ${p.sizes.length ? `
-        <div style="margin-top:14px;padding-top:14px;border-top:1px solid var(--border)">
-          <label style="display:block;margin-bottom:8px">Stock per size</label>
-          <div class="stock-grid">
-            ${p.sizes.map(s => `
-              <div class="stock-cell">
-                <div class="stock-size">${escapeHtml(s)}</div>
-                <input type="number" min="0" value="${p.stockBySize[s]||''}" placeholder="0" oninput="updStock('${escapeAttr(s)}',this.value)">
-              </div>
-            `).join('')}
-            <div class="stock-cell stock-total">
-              <div class="stock-size">TOTAL</div>
-              <div class="stock-total-val">${Object.values(p.stockBySize).reduce((a,b)=>a+(parseInt(b)||0),0)}</div>
-            </div>
-          </div>
-        </div>
-      ` : '<div class="help" style="margin-top:8px">Pick sizes above to set stock per size</div>'}
-    </div>
+    ${renderSizesSection(p, idx)}
 
     <div class="section">
       <div class="section-title">Colours <button class="small-action" onclick="copyFromPrev('colours')" ${idx===0?'disabled':''}>↑ Copy from previous</button></div>
@@ -1540,6 +1530,7 @@ async function exportFKStockList(){
     { header: 'QUANTITY', key: 'qty', width: 12 },
     { header: 'RETAIL PRICE', key: 'price', width: 16 },
     { header: 'PRODUCT DETAILS', key: 'specs', width: 40 },
+    { header: 'SEO KEYWORDS', key: 'keywords', width: 40 },
   ];
 
   // Style header row
@@ -1584,6 +1575,7 @@ async function exportFKStockList(){
       qty: totalQty || '',
       price: parseFloat(p.retailPrice) || null,
       specs: fullSpecs,
+      keywords: p.keywords || '',
     });
 
     // Currency format for price
@@ -1593,16 +1585,15 @@ async function exportFKStockList(){
     row.height = 110;
     row.alignment = { vertical: 'top', wrapText: true };
 
-    // Embed product images only (slot1 = product hero, gallery = additional shots)
-    // Exclude slot2 (sizing chart) and slot3 (specs screenshot) — those aren't product photos
+    // Embed product images stacked vertically in the Images column (B, index 1)
     const productImgIds = [...new Set([
       ...(p.slot1ImageIds||[]),
       ...(p.galleryImageIds||[]),
     ])];
-    // Limit to max 6 images to keep the spreadsheet manageable
-    const imgIds = productImgIds.slice(0, 6);
-    const imgSize = 60;
-    const imgsPerRow = 2;
+    // Limit to max 4 images per product
+    const imgIds = productImgIds.slice(0, 4);
+    const imgSize = 70;
+    const imgPadding = 5;
     let imgIdx = 0;
     for (const imgId of imgIds) {
       try {
@@ -1610,19 +1601,21 @@ async function exportFKStockList(){
         if (dataUrl) {
           const b64 = dataUrl.split(',')[1];
           const excelImgId = wb.addImage({ base64: b64, extension: 'jpeg' });
-          const colInRow = imgIdx % imgsPerRow;
-          const rowInGrid = Math.floor(imgIdx / imgsPerRow);
+          // Stack vertically: each image offset further down within the row
+          const yOffset = 0.03 + (imgIdx * 0.24);
           ws.addImage(excelImgId, {
-            tl: { col: 1.02 + (colInRow * 0.45), row: rowNum - 1 + 0.05 + (rowInGrid * 0.45) },
+            tl: { col: 1.05, row: rowNum - 1 + yOffset },
             ext: { width: imgSize, height: imgSize }
           });
           imgIdx++;
         }
       } catch (e) { console.warn('Image embed failed:', p.code, imgId, e); }
     }
-    // Increase row height if images wrap to multiple rows
-    const imgRows = Math.ceil(imgIds.length / imgsPerRow);
-    if (imgRows > 1) row.height = Math.max(row.height, imgRows * 70 + 20);
+    // Set row height to fit stacked images
+    if (imgIds.length > 0) {
+      const neededHeight = imgIds.length * (imgSize + imgPadding) + 10;
+      row.height = Math.max(row.height, neededHeight);
+    }
   }
 
   // Freeze header row
@@ -1852,6 +1845,7 @@ async function renderTable(){
     {k:'_pattern', label:'Pattern', sortable:false, w:'80px'},
     {k:'_length', label:'Length', sortable:false, w:'80px'},
     {k:'_feature', label:'Feature', sortable:false, w:'90px'},
+    {k:'keywords', label:'SEO Keywords', w:'180px'},
     {k:'supplierName', label:'Supplier', w:'100px'},
     {k:'_status', label:'OK', sortable:false, w:'30px'},
     {k:'_open', label:'', sortable:false, w:'50px'},
@@ -1903,6 +1897,7 @@ async function renderTable(){
       <td style="font-size:10px">${escapeHtml(sp.pattern_type||'')}</td>
       <td style="font-size:10px">${escapeHtml(sp.length_category||'')}</td>
       <td style="font-size:10px">${escapeHtml(sp.feature||'')}</td>
+      <td><textarea oninput="updField('${p.id}','keywords',this.value)" style="min-width:160px;min-height:40px" placeholder="SEO keywords...">${escapeHtml(p.keywords||'')}</textarea></td>
       <td><input value="${escapeAttr(p.supplierName)}" oninput="updField('${p.id}','supplierName',this.value)" style="width:90px"></td>
       <td style="vertical-align:middle"><div class="status-dot status-${statusOf(p)}" style="display:inline-block" title="${statusOf(p)}"></div></td>
       <td style="vertical-align:middle"><button class="small-action" onclick="state.activeId='${p.id}';toggleView()">-></button></td>
@@ -2410,6 +2405,58 @@ function blobToDataUrl(blob){
 }
 
 // ============ INTAKE PIPELINE ============
+// ============ SIZES SECTION (category-aware) ============
+function renderSizesSection(p, idx){
+  const total = Object.values(p.stockBySize||{}).reduce((a,b)=>a+(parseInt(b)||0),0);
+  const isAccessory = isAccessoryCategory(p.category);
+  const isShoe = isShoeCategory(p.category);
+  const chips = getSizeChips(p);
+  const title = isAccessory ? 'Quantity Ordered' : 'Sizes Ordered';
+
+  let html = '<div class="section">';
+  html += '<div class="section-title">' + title + ' <button class="small-action" onclick="copyFromPrev(\'sizes\')" ' + (idx===0?'disabled':'') + '>↑ Copy from previous</button></div>';
+
+  if (isAccessory) {
+    html += '<div class="help" style="margin-bottom:8px">This is an accessory — enter total quantity ordered</div>';
+    html += '<div class="stock-grid" style="max-width:200px">';
+    html += '<div class="stock-cell"><div class="stock-size">QTY</div>';
+    html += '<input type="number" min="0" value="' + (p.stockBySize['ONE_SIZE']||'') + '" placeholder="0" oninput="updStock(\'ONE_SIZE\',this.value)"></div>';
+    html += '<div class="stock-cell stock-total"><div class="stock-size">TOTAL</div><div class="stock-total-val">' + total + '</div></div>';
+    html += '</div>';
+  } else {
+    if ((p.sizingChartData||[]).length) {
+      html += '<div class="help" style="margin-bottom:8px">Detected in sizing chart: ' + p.sizingChartData.map(function(r){return escapeHtml(r.size)}).join(', ') + ' — click the chips below to select which you ordered</div>';
+    } else {
+      html += '<div class="help" style="margin-bottom:8px">' + (isShoe ? 'Shoe sizes 36-41 shown' : 'Click to select the sizes you ordered') + '</div>';
+    }
+    html += '<div class="chip-row">';
+    chips.forEach(function(s){
+      html += '<div class="chip ' + (p.sizes.includes(s)?'active':'') + '" onclick="toggleSize(\'' + s + '\')">' + s + '</div>';
+    });
+    p.sizes.filter(function(s){ return !chips.includes(s); }).forEach(function(s){
+      html += '<div class="chip active removable" onclick="removeSize(\'' + escapeAttr(s) + '\')">' + escapeHtml(s) + ' <span class="x">×</span></div>';
+    });
+    html += '<input class="chip-input" placeholder="+ custom" onkeydown="if(event.key===\'Enter\'){addCustomSize(this.value);this.value=\'\'}">';
+    html += '</div>';
+
+    if (p.sizes.length) {
+      html += '<div style="margin-top:14px;padding-top:14px;border-top:1px solid var(--border)">';
+      html += '<label style="display:block;margin-bottom:8px">Stock per size</label>';
+      html += '<div class="stock-grid">';
+      p.sizes.forEach(function(s){
+        html += '<div class="stock-cell"><div class="stock-size">' + escapeHtml(s) + '</div>';
+        html += '<input type="number" min="0" value="' + (p.stockBySize[s]||'') + '" placeholder="0" oninput="updStock(\'' + escapeAttr(s) + '\',this.value)"></div>';
+      });
+      html += '<div class="stock-cell stock-total"><div class="stock-size">TOTAL</div><div class="stock-total-val">' + total + '</div></div>';
+      html += '</div></div>';
+    } else {
+      html += '<div class="help" style="margin-top:8px">Pick sizes above to set stock per size</div>';
+    }
+  }
+  html += '</div>';
+  return html;
+}
+
 const CTA_PHRASES = [
   "⚡ LET'S GO!!",
   "🔥 HIT ME BITCH!!",
@@ -2423,6 +2470,11 @@ const CTA_PHRASES = [
   "💪 ANCHOVIES FOR THE WIN!!",
   "🎯 PULL THE TRIGGER!!",
   "🤫 WATCH THIS...",
+  "🎸 HIT ME WITH YOUR RHYTHM STICK!!",
+  "😏 CLICK ME!! — U KNOW U WANNA :)",
+  "🐔 DO THE FUNKY CHICKEN!!",
+  "💥 LET ME SHOW YOU WHAT I'M CAPABLE OF!!",
+  "🌶️ WOW! THAT'S HOT!",
 ];
 function randomCTA(){ return CTA_PHRASES[Math.floor(Math.random()*CTA_PHRASES.length)]; }
 
@@ -2817,6 +2869,27 @@ const QUOTES = [
   { text: "A queen is never late — the world just wasn't ready.", author: "", emoji: "👸" },
   { text: "Create the things you wish existed.", author: "", emoji: "🎨" },
   { text: "Your only limit is your mind.", author: "", emoji: "🧠" },
+  { text: "Fashion is the armour to survive the reality of everyday life.", author: "Bill Cunningham", emoji: "🛡️" },
+  { text: "In order to be irreplaceable one must always be different.", author: "Coco Chanel", emoji: "💫" },
+  { text: "I don't do fashion. I am fashion.", author: "Coco Chanel", emoji: "👠" },
+  { text: "Give a girl the right shoes, and she can conquer the world.", author: "Marilyn Monroe", emoji: "👢" },
+  { text: "Elegance is not standing out, but being remembered.", author: "Giorgio Armani", emoji: "✨" },
+  { text: "What you wear is how you present yourself to the world. Fashion is instant language.", author: "Miuccia Prada", emoji: "🗣️" },
+  { text: "Don't be into trends. Don't make fashion own you. You decide what you are.", author: "Gianni Versace", emoji: "🦁" },
+  { text: "The goal isn't to get rich. The goal is to live rich.", author: "", emoji: "🌴" },
+  { text: "Revenue is vanity, profit is sanity, cash is king.", author: "", emoji: "👑" },
+  { text: "First they ignore you, then they laugh at you, then they fight you, then you win.", author: "Mahatma Gandhi", emoji: "🏆" },
+  { text: "The way to get started is to quit talking and begin doing.", author: "Walt Disney", emoji: "⚡" },
+  { text: "I never dreamed about success. I worked for it.", author: "Estée Lauder", emoji: "💅" },
+  { text: "Behind every successful woman is a tribe of other successful women who have her back.", author: "", emoji: "👯" },
+  { text: "Style is a way to say who you are without having to speak.", author: "Rachel Zoe", emoji: "🎭" },
+  { text: "Turn your wounds into wisdom.", author: "Oprah Winfrey", emoji: "🌟" },
+  { text: "Be so good they can't ignore you.", author: "Steve Martin", emoji: "🔥" },
+  { text: "Life is too short to wear boring clothes.", author: "", emoji: "👗" },
+  { text: "Success usually comes to those who are too busy to be looking for it.", author: "Henry David Thoreau", emoji: "🐝" },
+  { text: "You can't build a reputation on what you are going to do.", author: "Henry Ford", emoji: "🔨" },
+  { text: "The only way to do great work is to love what you do.", author: "Steve Jobs", emoji: "❤️" },
+  { text: "If you want something you've never had, you must be willing to do something you've never done.", author: "", emoji: "🚀" },
 ];
 
 const DOMMIE_MESSAGES = [
