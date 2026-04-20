@@ -1593,7 +1593,15 @@ async function exportFKStockList(){
     // Limit to max 4 images per product
     const imgIds = productImgIds.slice(0, 4);
     const imgSize = 70;
-    const imgPadding = 5;
+    const imgGap = 8;
+    const imgBlockHeight = imgIds.length * imgSize + (imgIds.length - 1) * imgGap + 16;
+
+    // Set row height FIRST so we can calculate fractional offsets correctly
+    if (imgIds.length > 0) {
+      row.height = Math.max(row.height, imgBlockHeight);
+    }
+    const rowPx = row.height * 1.333; // Excel points to pixels (approx)
+
     let imgIdx = 0;
     for (const imgId of imgIds) {
       try {
@@ -1601,20 +1609,16 @@ async function exportFKStockList(){
         if (dataUrl) {
           const b64 = dataUrl.split(',')[1];
           const excelImgId = wb.addImage({ base64: b64, extension: 'jpeg' });
-          // Stack vertically: each image offset further down within the row
-          const yOffset = 0.03 + (imgIdx * 0.24);
+          // Calculate pixel position, then convert to row fraction
+          const pixelY = 8 + imgIdx * (imgSize + imgGap);
+          const rowFraction = pixelY / rowPx;
           ws.addImage(excelImgId, {
-            tl: { col: 1.05, row: rowNum - 1 + yOffset },
+            tl: { col: 1.05, row: rowNum - 1 + rowFraction },
             ext: { width: imgSize, height: imgSize }
           });
           imgIdx++;
         }
       } catch (e) { console.warn('Image embed failed:', p.code, imgId, e); }
-    }
-    // Set row height to fit stacked images
-    if (imgIds.length > 0) {
-      const neededHeight = imgIds.length * (imgSize + imgPadding) + 10;
-      row.height = Math.max(row.height, neededHeight);
     }
   }
 
