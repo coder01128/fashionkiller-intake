@@ -353,30 +353,7 @@ function initSupabase(){
     sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
     console.log('[Supabase] Client initialized');
     if (statusEl) statusEl.textContent = '🟢 Cloud connected';
-    // Listen for auth changes
-    sb.auth.onAuthStateChange((event, session) => {
-      console.log('[Auth]', event, session?.user?.email);
-      if (session?.user) {
-        sbUser = session.user;
-        updateSyncBadge('synced');
-        // Initial sync from cloud
-        syncFromCloud();
-      } else {
-        sbUser = null;
-        updateSyncBadge('offline');
-      }
-    });
-    // Check existing session
-    sb.auth.getSession().then(({data:{session}}) => {
-      if (session?.user) {
-        sbUser = session.user;
-        document.getElementById('loginScreen').style.display = 'none';
-        document.getElementById('app').style.display = '';
-        updateSyncBadge('synced');
-        loadAll();
-        setTimeout(showMotivationalQuote, 500);
-      }
-    });
+    // Do NOT set up auth listener here — boot sequence handles everything
     return true;
   }
   if (statusEl) statusEl.textContent = '🔴 Cloud unavailable — use offline mode';
@@ -403,7 +380,9 @@ async function doLogin(){
     document.getElementById('loginScreen').style.display = 'none';
     document.getElementById('app').style.display = '';
     updateSyncBadge('synced');
-    loadAll();
+    // Load local first, then sync
+    await loadAll();
+    syncFromCloud(); // background
     setTimeout(showMotivationalQuote, 500);
   } catch(e){
     msg.textContent = e.message || 'Sign in failed';
@@ -433,7 +412,8 @@ async function doSignup(){
       document.getElementById('loginScreen').style.display = 'none';
       document.getElementById('app').style.display = '';
       updateSyncBadge('synced');
-      loadAll();
+      await loadAll();
+      syncFromCloud(); // background
       setTimeout(showMotivationalQuote, 500);
     } else {
       // Email confirmation is required — tell user to check email
@@ -450,11 +430,11 @@ async function doSignup(){
   }
 }
 
-function skipLogin(){
+async function skipLogin(){
   document.getElementById('loginScreen').style.display = 'none';
   document.getElementById('app').style.display = '';
   updateSyncBadge('offline');
-  loadAll();
+  await loadAll();
   setTimeout(showMotivationalQuote, 500);
 }
 
@@ -582,10 +562,14 @@ async function syncFromCloud(){
       .select('*').eq('user_id', sbUser.id).order('sort_order');
     if (error) throw error;
     if (!cloudRows || !cloudRows.length) {
-      // No cloud data — push local data up
-      console.log('[Sync] No cloud data. Pushing local products up...');
-      for (const p of state.products) {
-        await syncProductToCloud(p);
+      // No cloud data — only push if we actually have local data
+      if (state.products.length > 0) {
+        console.log('[Sync] No cloud data but have', state.products.length, 'local products. Pushing up...');
+        for (const p of state.products) {
+          await syncProductToCloud(p);
+        }
+      } else {
+        console.log('[Sync] No cloud data and no local data. Nothing to sync.');
       }
       updateSyncBadge('synced');
       return;
@@ -1051,8 +1035,9 @@ async function renderList(){
   `).join('') || '<div style="padding:20px;text-align:center;color:var(--muted);font-size:12px">No products yet.<br>Click "+ Add Product" or "+70" to start.</div>';
   // Load thumbs async
   for (const p of filtered) {
-    if (p.imageIds[0]) {
-      const url = await loadImage(p.imageIds[0]);
+    const thumbId = (p.slot1ImageIds&&p.slot1ImageIds[0]) || (p.galleryImageIds&&p.galleryImageIds[0]) || (p.imageIds&&p.imageIds[0]);
+    if (thumbId) {
+      const url = await loadImage(thumbId);
       const el = document.getElementById('thumb-'+p.id);
       if (el && url) el.style.backgroundImage = `url(${url})`;
     }
@@ -3095,59 +3080,81 @@ function showMotivationalQuote(){
 }
 
 // ============ INIT ============
-// Boot the app. Supabase is optional — app MUST work without it.
-function bootApp(){
-  document.getElementById('loginScreen').style.display = 'none';
-  document.getElementById('app').style.display = '';
-  loadAll();
-  setTimeout(showMotivationalQuote, 500);
-}
+// STRICT BOOT SEQUENCE:
+// 1. Wait for Supabase CDN (with timeout)
+// 2. Init Supabase client
+// 3. Check for existing session
+// 4. Load local data from IndexedDB (ALWAYS — before any sync)
+// 5. Show the app
+// 6. THEN sync with cloud (only after local data is loaded)
 
-function trySupabaseBoot(){
-  try {
-    const ok = initSupabase();
-    if (!ok) {
-      console.warn('[Boot] Supabase not available, running offline');
-      updateSyncBadge('offline');
-      bootApp();
-      return;
-    }
-    sb.auth.getSession().then(({data:{session}}) => {
+let booted = false;
+
+async function bootApp(){
+  if (booted) return;
+  booted = true;
+
+  // Step 1-2: Init Supabase (already done by poller)
+  const hasSupabase = !!sb;
+
+  // Step 3: Check for existing auth session
+  let hasSession = false;
+  if (hasSupabase) {
+    try {
+      const { data: { session } } = await sb.auth.getSession();
       if (session && session.user) {
         sbUser = session.user;
+        hasSession = true;
         updateSyncBadge('synced');
-        bootApp();
+        console.log('[Boot] Existing session found:', sbUser.email);
       }
-    }).catch(e => {
+    } catch(e) {
       console.warn('[Boot] Session check failed:', e);
-    });
-  } catch(e) {
-    console.warn('[Boot] Supabase init crashed:', e);
-    updateSyncBadge('offline');
-    bootApp();
+    }
+  }
+
+  // Step 4: ALWAYS load local data first
+  await loadAll();
+  console.log('[Boot] Local data loaded:', state.products.length, 'products');
+
+  // Step 5: Show app (skip login if has session, show login if not)
+  if (hasSession || !hasSupabase) {
+    document.getElementById('loginScreen').style.display = 'none';
+    document.getElementById('app').style.display = '';
+    if (!hasSupabase) updateSyncBadge('offline');
+    setTimeout(showMotivationalQuote, 500);
+  }
+  // If hasSupabase but no session: login screen stays visible, user clicks Sign In or Skip
+
+  // Step 6: THEN sync (only after local data is loaded)
+  if (hasSession && state.products.length === 0) {
+    // Local is empty but we're logged in — pull from cloud
+    console.log('[Boot] Local empty, pulling from cloud...');
+    await syncFromCloud();
+    renderAll();
+  } else if (hasSession && state.products.length > 0) {
+    // Local has data — sync in background (don't block)
+    console.log('[Boot] Local has data, background sync...');
+    syncFromCloud(); // no await — runs in background
   }
 }
 
-let booted = false;
-function attemptBoot(){
-  if (booted) return;
-  booted = true;
-  trySupabaseBoot();
-}
-
+// Wait for Supabase CDN, then boot
 if (typeof supabase !== 'undefined') {
-  attemptBoot();
+  initSupabase();
+  bootApp();
 } else {
   let checks = 0;
   const poller = setInterval(() => {
     checks++;
     if (typeof supabase !== 'undefined') {
       clearInterval(poller);
-      attemptBoot();
+      initSupabase();
+      bootApp();
     } else if (checks >= 30) {
       clearInterval(poller);
       console.warn('[Boot] Supabase CDN timeout, booting offline');
-      attemptBoot();
+      bootApp();
     }
   }, 100);
 }
