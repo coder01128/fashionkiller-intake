@@ -300,7 +300,7 @@
     </div>
     <button class="btn" id="viewToggle" onclick="toggleView()">📋 Table View</button>
     <button class="btn" onclick="exportBackup()" title="Save full backup NOW" style="background:var(--good);border-color:var(--good);color:#000;font-weight:600">💾 Backup</button>
-    <button class="btn" onclick="doLogout()" title="Sign out" style="font-size:11px">🚪</button>
+    <button class="btn" onclick="doLogout()" title="Sign out" style="font-size:11px">Sign Out</button>
     <button class="btn" onclick="openSettings()">⚙ Settings</button>
     <div style="position:relative">
       <button class="btn btn-primary" onclick="toggleExportMenu(event)">⬇ Export ▾</button>
@@ -459,13 +459,11 @@ function skipLogin(){
 }
 
 async function doLogout(){
-  if (!confirm('Sign out? Your data is saved locally and in the cloud.')) return;
+  if (!confirm('Sign out? Your data is saved in the cloud and will sync back when you log in again.')) return;
   if (sb) {
     try { await sb.auth.signOut(); } catch(e){}
   }
   sbUser = null;
-  state.products = [];
-  state.activeId = null;
   updateSyncBadge('offline');
   document.getElementById('app').style.display = 'none';
   document.getElementById('loginScreen').style.display = '';
@@ -831,10 +829,10 @@ async function purgeDuplicates(){
     }
   }
   if (toRemove.length) {
-    console.log('[Dedup] Removing', toRemove.length, 'duplicate products');
+    console.log('[Dedup] Hiding', toRemove.length, 'duplicate products locally');
     for (const id of toRemove) {
       await STORE.delete('fk:p:'+id).catch(()=>{});
-      deleteProductFromCloud(id);
+      // Do NOT delete from cloud — just hide locally to avoid data loss
     }
     state.products = state.products.filter(p => !toRemove.includes(p.id));
     await saveMeta();
@@ -2632,22 +2630,22 @@ function renderSizesSection(p, idx){
 }
 
 const CTA_PHRASES = [
-  "⚡ LET'S GO!",
-  "🔥 HIT ME BITCH!",
-  "💅 CLICK ME — OHHHH YEAH:)",
-  "🚀 LET'S DO THIS!",
-  "👑 SEND IT LIKE AN ENVELOPE",
-  "💎 BE GENTLE",
-  "🦋 MAKE THE VOODOO",
+  "⚡ LET'S GO!!",
+  "🔥 HIT ME BITCH!!",
+  "💅 CLICK ME — OHHHH YEAH!!",
+  "🚀 LET'S DO IT!!",
+  "👑 SEND IT QUEEN!!",
+  "💎 SMASH THAT BUTTON!!",
+  "🦋 MAKE THE MAGIC HAPPEN!!",
   "⚡ YAAAS — EXTRACT!!",
-  "🔥 DO THE DAMN THING!",
-  "💪 ANCHOVIES FOR THE WIN",
-  "🎯 PULL MY FINGER",
-  "🤫 HOLD MY BEER AND WATCH THIS...",
-  "🎸 HIT ME WITH YOUR RHYTHM STICK - OW!",
-  "😏 CLICK ME — U KNOW U WANNA :)",
-  "🐔 DO THE FUNKY CHICKEN",
-  "💥 LET ME SHOW YOU WHAT I'M CAPABLE OF",
+  "🔥 DO THE DAMN THING!!",
+  "💪 ANCHOVIES FOR THE WIN!!",
+  "🎯 PULL THE TRIGGER!!",
+  "🤫 WATCH THIS...",
+  "🎸 HIT ME WITH YOUR RHYTHM STICK!!",
+  "😏 CLICK ME!! — U KNOW U WANNA :)",
+  "🐔 DO THE FUNKY CHICKEN!!",
+  "💥 LET ME SHOW YOU WHAT I'M CAPABLE OF!!",
   "🌶️ WOW! THAT'S HOT!",
 ];
 function randomCTA(){ return CTA_PHRASES[Math.floor(Math.random()*CTA_PHRASES.length)]; }
