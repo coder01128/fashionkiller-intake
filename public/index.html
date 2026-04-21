@@ -1602,13 +1602,25 @@ async function exportFKStockList(){
   wb.created = new Date();
   const ws = wb.addWorksheet('Products');
 
-  // Columns — images get 4 adjacent columns (B-E)
+  // First pass: find max number of product images across all products
+  let maxImgs = 0;
+  const allProductImgs = [];
+  for (const p of state.products) {
+    const imgs = [...new Set([...(p.slot1ImageIds||[]), ...(p.galleryImageIds||[])])];
+    allProductImgs.push(imgs);
+    if (imgs.length > maxImgs) maxImgs = imgs.length;
+  }
+  if (maxImgs < 1) maxImgs = 1; // at least 1 image column
+
+  // Build columns dynamically — SKU + N image columns + rest
+  const imgCols = [];
+  for (let n = 1; n <= maxImgs; n++) {
+    imgCols.push({ header: 'IMG ' + n, key: 'img' + n, width: 14 });
+  }
+
   ws.columns = [
     { header: 'STOCK CODE / SKU', key: 'sku', width: 16 },
-    { header: 'IMG 1', key: 'img1', width: 14 },
-    { header: 'IMG 2', key: 'img2', width: 14 },
-    { header: 'IMG 3', key: 'img3', width: 14 },
-    { header: 'IMG 4', key: 'img4', width: 14 },
+    ...imgCols,
     { header: 'PRODUCT NAME', key: 'name', width: 32 },
     { header: 'SHORT DESCRIPTION', key: 'shortDesc', width: 34 },
     { header: 'FULL DESCRIPTION', key: 'fullDesc', width: 50 },
@@ -1651,9 +1663,13 @@ async function exportFKStockList(){
     // Add care instructions if present
     const fullSpecs = [specsStr, p.careInstructions ? `Care: ${p.careInstructions}` : ''].filter(Boolean).join('\n');
 
+    // Build dynamic image cell placeholders
+    const imgCellData = {};
+    for (let n = 1; n <= maxImgs; n++) imgCellData['img' + n] = '';
+
     const row = ws.addRow({
       sku: p.code,
-      img1: '', img2: '', img3: '', img4: '',
+      ...imgCellData,
       name: p.name,
       shortDesc: p.shortDescription || '',
       fullDesc: p.description || '',
@@ -1673,12 +1689,8 @@ async function exportFKStockList(){
     row.height = 110;
     row.alignment = { vertical: 'top', wrapText: true };
 
-    // Embed product images — one per cell in columns B(1), C(2), D(3), E(4)
-    const productImgIds = [...new Set([
-      ...(p.slot1ImageIds||[]),
-      ...(p.galleryImageIds||[]),
-    ])];
-    const imgIds = productImgIds.slice(0, 4);
+    // Embed product images — one per cell, dynamic columns starting at index 1
+    const imgIds = allProductImgs[i];
     const imgSize = 80;
     row.height = 70;
 
@@ -1688,7 +1700,7 @@ async function exportFKStockList(){
         if (dataUrl) {
           const b64 = dataUrl.split(',')[1];
           const excelImgId = wb.addImage({ base64: b64, extension: 'jpeg' });
-          // Column index: B=1, C=2, D=3, E=4
+          // Column index: 1 = first IMG column, 2 = second, etc.
           ws.addImage(excelImgId, {
             tl: { col: 1 + imgIdx + 0.05, row: rowNum - 1 + 0.05 },
             ext: { width: imgSize, height: imgSize }
