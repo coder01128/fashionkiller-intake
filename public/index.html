@@ -300,6 +300,7 @@
     </div>
     <button class="btn" id="viewToggle" onclick="toggleView()">📋 Table View</button>
     <button class="btn" onclick="exportBackup()" title="Save full backup NOW" style="background:var(--good);border-color:var(--good);color:#000;font-weight:600">💾 Backup</button>
+    <button class="btn" onclick="doLogout()" title="Sign out" style="font-size:11px">🚪</button>
     <button class="btn" onclick="openSettings()">⚙ Settings</button>
     <div style="position:relative">
       <button class="btn btn-primary" onclick="toggleExportMenu(event)">⬇ Export ▾</button>
@@ -455,6 +456,24 @@ function skipLogin(){
   updateSyncBadge('offline');
   loadAll();
   setTimeout(showMotivationalQuote, 500);
+}
+
+async function doLogout(){
+  if (!confirm('Sign out? Your data is saved locally and in the cloud.')) return;
+  if (sb) {
+    try { await sb.auth.signOut(); } catch(e){}
+  }
+  sbUser = null;
+  state.products = [];
+  state.activeId = null;
+  updateSyncBadge('offline');
+  document.getElementById('app').style.display = 'none';
+  document.getElementById('loginScreen').style.display = '';
+  document.getElementById('loginMsg').textContent = '';
+  document.getElementById('loginEmail').value = '';
+  document.getElementById('loginPass').value = '';
+  document.getElementById('loginBtn').disabled = false;
+  document.getElementById('loginBtn').textContent = 'Sign In';
 }
 
 function updateSyncBadge(status){
@@ -782,9 +801,63 @@ async function loadAll(){
     }
   } catch(e){ console.warn('Load:', e); }
   if (state.products.length && !state.activeId) state.activeId = state.products[0].id;
+  // Purge any existing duplicates (same code/SKU)
+  await purgeDuplicates();
   applySidebarWidth();
   initSidebarDrag();
   renderAll();
+}
+
+async function purgeDuplicates(){
+  const seen = new Map(); // code -> first product
+  const toRemove = [];
+  for (const p of state.products) {
+    const key = p.code || p.id; // use code if available, else id
+    if (seen.has(key)) {
+      // Keep the one with more data (more filled fields)
+      const existing = seen.get(key);
+      const existingScore = scoreProduct(existing);
+      const newScore = scoreProduct(p);
+      if (newScore > existingScore) {
+        // New one is better — mark old one for removal
+        toRemove.push(existing.id);
+        seen.set(key, p);
+      } else {
+        // Existing is better or equal — mark new one for removal
+        toRemove.push(p.id);
+      }
+    } else {
+      seen.set(key, p);
+    }
+  }
+  if (toRemove.length) {
+    console.log('[Dedup] Removing', toRemove.length, 'duplicate products');
+    for (const id of toRemove) {
+      await STORE.delete('fk:p:'+id).catch(()=>{});
+      deleteProductFromCloud(id);
+    }
+    state.products = state.products.filter(p => !toRemove.includes(p.id));
+    await saveMeta();
+  }
+}
+
+function scoreProduct(p){
+  // Higher score = more complete product (used to pick the better duplicate)
+  let s = 0;
+  if (p.name) s += 2;
+  if (p.code) s++;
+  if (p.description) s += 2;
+  if (p.shortDescription) s++;
+  if (p.retailPrice) s += 2;
+  if (p.costPrice) s += 2;
+  if ((p.sizes||[]).length) s++;
+  if ((p.colours||[]).length) s++;
+  if (Object.keys(p.stockBySize||{}).length) s += 2;
+  if ((p.slot1ImageIds||[]).length) s += 2;
+  if ((p.galleryImageIds||[]).length) s += 2;
+  if (Object.keys(p.specs||{}).length) s++;
+  if (p.manualReviewDone) s += 3;
+  return s;
 }
 
 function applySidebarWidth(){
@@ -2559,22 +2632,22 @@ function renderSizesSection(p, idx){
 }
 
 const CTA_PHRASES = [
-  "⚡ LET'S GO!!",
-  "🔥 HIT ME BITCH!!",
-  "💅 CLICK ME — OHHHH YEAH!!",
-  "🚀 LET'S DO IT!!",
-  "👑 SEND IT QUEEN!!",
-  "💎 SMASH THAT BUTTON!!",
-  "🦋 MAKE THE MAGIC HAPPEN!!",
+  "⚡ LET'S GO!",
+  "🔥 HIT ME BITCH!",
+  "💅 CLICK ME — OHHHH YEAH:)",
+  "🚀 LET'S DO THIS!",
+  "👑 SEND IT LIKE AN ENVELOPE",
+  "💎 BE GENTLE",
+  "🦋 MAKE THE VOODOO",
   "⚡ YAAAS — EXTRACT!!",
-  "🔥 DO THE DAMN THING!!",
-  "💪 ANCHOVIES FOR THE WIN!!",
-  "🎯 PULL THE TRIGGER!!",
-  "🤫 WATCH THIS...",
-  "🎸 HIT ME WITH YOUR RHYTHM STICK!!",
-  "😏 CLICK ME!! — U KNOW U WANNA :)",
-  "🐔 DO THE FUNKY CHICKEN!!",
-  "💥 LET ME SHOW YOU WHAT I'M CAPABLE OF!!",
+  "🔥 DO THE DAMN THING!",
+  "💪 ANCHOVIES FOR THE WIN",
+  "🎯 PULL MY FINGER",
+  "🤫 HOLD MY BEER AND WATCH THIS...",
+  "🎸 HIT ME WITH YOUR RHYTHM STICK - OW!",
+  "😏 CLICK ME — U KNOW U WANNA :)",
+  "🐔 DO THE FUNKY CHICKEN",
+  "💥 LET ME SHOW YOU WHAT I'M CAPABLE OF",
   "🌶️ WOW! THAT'S HOT!",
 ];
 function randomCTA(){ return CTA_PHRASES[Math.floor(Math.random()*CTA_PHRASES.length)]; }
