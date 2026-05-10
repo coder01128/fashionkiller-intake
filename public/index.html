@@ -3192,30 +3192,25 @@ async function exportBarTender(){
   }
   if (generated > 0) showToast(`Generated ${generated} missing barcodes`);
 
-  const rows = [['SKU','PRODUCT_NAME','SIZE','BARCODE']];
+  const rows = [['SKU','PRODUCT_NAME','SIZE','RETAIL_PRICE','BARCODE']];
 
   for (const p of state.products) {
+    const price = parseFloat(p.retailPrice)||0;
+    const priceStr = price > 0 ? `R ${Math.round(price)}` : '';
     const sizes = Object.entries(p.stockBySize||{})
       .filter(([,q]) => parseInt(q) > 0)
       .map(([s]) => s);
 
     if (sizes.length > 0) {
-      // One row per size
       for (const size of sizes) {
-        rows.push([
-          p.code || '',
-          p.name || '',
-          size,
-          p.barcode || ''
-        ]);
+        rows.push([p.code||'', p.name||'', size, priceStr, p.barcode||'']);
       }
     } else if ((p.sizes||[]).length > 0) {
       for (const size of p.sizes) {
-        rows.push([p.code||'', p.name||'', size, p.barcode||'']);
+        rows.push([p.code||'', p.name||'', size, priceStr, p.barcode||'']);
       }
     } else {
-      // No sizes — single row
-      rows.push([p.code||'', p.name||'', 'ONE SIZE', p.barcode||'']);
+      rows.push([p.code||'', p.name||'', 'ONE SIZE', priceStr, p.barcode||'']);
     }
   }
 
