@@ -477,6 +477,7 @@ function productToRow(p){
     weight_grams: parseInt(p.weightGrams)||null,
     supplier_name: p.supplierName||'', supplier_url: p.supplierUrl||'',
     barcode: p.barcode||'',
+    barcodes_by_size: p.barcodesBySize||{},
     specs: p.specs||{}, sizing_chart_data: p.sizingChartData||[],
     care_instructions: p.careInstructions||'', model_info: p.modelInfo||'',
     slot1_status: p.slot1Status||'empty', slot2_status: p.slot2Status||'empty', slot3_status: p.slot3Status||'empty',
@@ -506,6 +507,7 @@ function rowToProduct(row){
     weightGrams: row.weight_grams!=null?String(row.weight_grams):'',
     supplierName: row.supplier_name||'', supplierUrl: row.supplier_url||'',
     barcode: row.barcode||'',
+    barcodesBySize: row.barcodes_by_size||{},
     specs: row.specs||{}, sizingChartData: row.sizing_chart_data||[],
     careInstructions: row.care_instructions||'', modelInfo: row.model_info||'',
     slot1Status: row.slot1_status||'empty', slot2Status: row.slot2_status||'empty', slot3Status: row.slot3_status||'empty',
@@ -940,6 +942,7 @@ function newProduct(overrides={}){
     supplierUrl: '',
     supplierName: '',
     barcode: overrides.barcode || generateEAN13(),  // EAN-13 auto-generated
+    barcodesBySize: overrides.barcodesBySize || {}, // per-size barcodes
     currency: state.settings.currency,
     ...overrides
   };
@@ -3181,47 +3184,74 @@ function renderBarcodeAfterEditor(p){
 async function exportBarTender(){
   if (!state.products.length){ alert('No products to export'); return; }
 
-  // Ensure all products have barcodes first
+  // Ensure every product has a barcodesBySize map with a unique EAN-13 per size
   let generated = 0;
   for (const p of state.products) {
-    if (!p.barcode || !validateEAN13(p.barcode)) {
-      p.barcode = generateEAN13();
-      await saveProduct(p);
-      generated++;
-    }
-  }
-  if (generated > 0) showToast(`Generated ${generated} missing barcodes`);
+    if (!p.barcodesBySize) p.barcodesBySize = {};
 
-  const rows = [['SKU','PRODUCT_NAME','SIZE','RETAIL_PRICE','BARCODE']];
+    // Collect all sizes for this product
+    const allSizes = [...new Set([
+      ...Object.keys(p.stockBySize||{}),
+      ...(p.sizes||[])
+    ])];
+    if (allSizes.length === 0) allSizes.push('ONE SIZE');
+
+    let changed = false;
+    for (const size of allSizes) {
+      if (!p.barcodesBySize[size] || !validateEAN13(p.barcodesBySize[size])) {
+        p.barcodesBySize[size] = generateEAN13();
+        changed = true;
+        generated++;
+      }
+    }
+    // Also ensure product-level barcode exists (for display in card)
+    if (!p.barcode || !validateEAN13(p.barcode)) {
+      p.barcode = p.barcodesBySize[allSizes[0]];
+      changed = true;
+    }
+    if (changed) await saveProduct(p);
+  }
+  if (generated > 0) showToast(`Generated ${generated} size barcodes`);
+
+  // Build rows — one per size
+  // BOM (UTF-8 BOM) makes Excel open CSV correctly without scientific notation for long numbers
+  const BOM = '\uFEFF';
+  const rowsArr = [['SKU','PRODUCT_NAME','SIZE','RETAIL_PRICE','BARCODE','QTY']];
 
   for (const p of state.products) {
     const price = parseFloat(p.retailPrice)||0;
-    const priceStr = price > 0 ? `R ${Math.round(price)}` : '';
-    const sizes = Object.entries(p.stockBySize||{})
-      .filter(([,q]) => parseInt(q) > 0)
-      .map(([s]) => s);
+    const priceVal = price > 0 ? Math.round(price) : '';
 
-    if (sizes.length > 0) {
-      for (const size of sizes) {
-        rows.push([p.code||'', p.name||'', size, priceStr, p.barcode||'']);
+    // Get sizes with stock qty > 0, fallback to p.sizes, fallback to ONE SIZE
+    const sizedStock = Object.entries(p.stockBySize||{})
+      .filter(([,q]) => parseInt(q) > 0);
+
+    if (sizedStock.length > 0) {
+      for (const [size, qty] of sizedStock) {
+        const bc = (p.barcodesBySize||{})[size] || p.barcode || '';
+        rowsArr.push([p.code||'', p.name||'', size, priceVal, bc, parseInt(qty)||1]);
       }
     } else if ((p.sizes||[]).length > 0) {
       for (const size of p.sizes) {
-        rows.push([p.code||'', p.name||'', size, priceStr, p.barcode||'']);
+        const bc = (p.barcodesBySize||{})[size] || p.barcode || '';
+        rowsArr.push([p.code||'', p.name||'', size, priceVal, bc, 1]);
       }
     } else {
-      rows.push([p.code||'', p.name||'', 'ONE SIZE', priceStr, p.barcode||'']);
+      const bc = (p.barcodesBySize||{})['ONE SIZE'] || p.barcode || '';
+      rowsArr.push([p.code||'', p.name||'', 'ONE SIZE', priceVal, bc, 1]);
     }
   }
 
-  const csv = rows.map(r => r.map(cell => {
-    const s = String(cell).replace(/"/g, '""');
-    return s.includes(',') || s.includes('"') || s.includes('\n') ? `"${s}"` : s;
-  }).join(',')).join('\r\n');
+  // CSV serialisation — wrap ALL fields in quotes to prevent Excel from
+  // mangling barcodes as scientific notation or prices as dates
+  const csvLines = rowsArr.map(row =>
+    row.map(cell => `"${String(cell).replace(/"/g,'""')}"`).join(',')
+  );
+  const csv = BOM + csvLines.join('\r\n');
 
   const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
   saveAs(blob, `FashionKiller_BarTender_${new Date().toISOString().slice(0,10)}.csv`);
-  showToast('✓ BarTender CSV ready! Import into BarTender Starter.');
+  showToast(`✓ BarTender CSV — ${rowsArr.length - 1} label rows ready`);
 }
 
 // ============ XLSX IMPORT (old stock sheet) ============
