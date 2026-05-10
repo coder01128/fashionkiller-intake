@@ -31,7 +31,7 @@
   .btn-primary{background:var(--pink);border-color:var(--pink);color:#fff}
   .btn-primary:hover{background:var(--pink-dim);border-color:var(--pink-dim)}
   .btn-ghost{background:transparent}
-  main{display:grid;grid-template-columns:280px 1fr 200px;overflow:hidden}
+  main{display:grid;grid-template-columns:280px 1fr;overflow:hidden}
   #sidebar{background:var(--panel);border-right:1px solid var(--border);display:flex;flex-direction:column;overflow:hidden}
   .sidebar-head{padding:12px;border-bottom:1px solid var(--border);display:flex;flex-direction:column;gap:8px}
   .search{background:var(--panel-2);border:1px solid var(--border);color:var(--text);padding:7px 10px;border-radius:6px;font-size:12px;font-family:inherit;width:100%}
@@ -150,18 +150,10 @@
   .score-tile.highlight{border-color:var(--pink);background:rgba(255,0,110,.06)}
   .score-tile.highlight .score-val{color:var(--pink)}
   #scorecard{background:var(--panel);border-top:2px solid var(--border);padding:12px 16px;overflow-x:auto}
-  /* Right filter panel */
-  #filterPanel{background:var(--panel);border-left:1px solid var(--border);padding:12px;overflow-y:auto}
-  .fp-title{font-size:10px;text-transform:uppercase;letter-spacing:1.5px;color:var(--pink);font-weight:700;margin-bottom:8px;font-family:'Bebas Neue';font-size:14px}
-  .fp-group{margin-bottom:16px}
-  .fp-label{font-size:9px;text-transform:uppercase;letter-spacing:1px;color:var(--muted);font-weight:600;margin-bottom:6px}
-  .fp-chips{display:flex;flex-wrap:wrap;gap:4px}
-  .fp-chip{background:var(--panel-2);border:1px solid var(--border);padding:4px 8px;border-radius:12px;font-size:10px;cursor:pointer;color:var(--muted);transition:all .15s;white-space:nowrap}
-  .fp-chip:hover{border-color:var(--pink);color:var(--text)}
-  .fp-chip.active{background:var(--pink);border-color:var(--pink);color:#fff}
-  .fp-clear{background:transparent;border:1px solid var(--border);color:var(--muted);padding:4px 8px;border-radius:4px;font-size:9px;cursor:pointer;width:100%;margin-top:8px;font-family:inherit;text-transform:uppercase;letter-spacing:1px}
-  .fp-clear:hover{border-color:var(--pink);color:var(--pink)}
-  .fp-count{font-size:9px;color:var(--muted);margin-left:2px}
+  /* Barcode field */
+  .barcode-wrap{display:flex;flex-direction:column;align-items:flex-start;gap:6px}
+  .barcode-img{background:#fff;padding:8px 12px;border-radius:6px;display:inline-block;margin-top:4px}
+  .barcode-img svg{display:block}
   .api-cost-note{font-size:11px;color:var(--muted);margin-top:8px;padding:8px;background:var(--panel-2);border-radius:4px}
   /* Stock by size grid */
   .stock-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(95px,1fr));gap:10px}
@@ -308,7 +300,10 @@
         <button class="btn btn-ghost" style="width:100%;text-align:left;border:none;padding:10px 12px;display:block" onclick="exportFKStockList();closeExportMenu()">📋 FK Stock List (Dommie's format + images)</button>
         <button class="btn btn-ghost" style="width:100%;text-align:left;border:none;padding:10px 12px;display:block" onclick="exportData();closeExportMenu()">📊 Detailed XLSX + images zip</button>
         <button class="btn btn-ghost" style="width:100%;text-align:left;border:none;padding:10px 12px;display:block" onclick="exportWooCommerce();closeExportMenu()">🛒 WooCommerce CSV (for website lady)</button>
+        <button class="btn btn-ghost" style="width:100%;text-align:left;border:none;padding:10px 12px;display:block" onclick="exportBarTender();closeExportMenu()">📦 BarTender Label CSV</button>
         <button class="btn btn-ghost" style="width:100%;text-align:left;border:none;padding:10px 12px;display:block" onclick="exportBackup();closeExportMenu()">💾 Full Backup (restorable)</button>
+        <div style="border-top:1px solid var(--border);margin:4px 0"></div>
+        <button class="btn btn-ghost" style="width:100%;text-align:left;border:none;padding:10px 12px;display:block" onclick="openXlsxImport();closeExportMenu()">📥 Import from Excel / CSV</button>
       </div>
     </div>
   </header>
@@ -326,7 +321,6 @@
     </aside>
     <section id="editor"></section>
     <section id="tableView" style="display:none;flex-direction:column"></section>
-    <aside id="filterPanel"></aside>
   </main>
   <div id="scorecard"></div>
 </div>
@@ -336,6 +330,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js" async></script>
+<script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.6/dist/JsBarcode.all.min.js"></script>
 <script>
 // ============ SUPABASE ============
 const SUPABASE_URL = 'https://fbinlujynlxrgnfeozux.supabase.co';
@@ -481,6 +476,7 @@ function productToRow(p){
     currency: p.currency||'ZAR',
     weight_grams: parseInt(p.weightGrams)||null,
     supplier_name: p.supplierName||'', supplier_url: p.supplierUrl||'',
+    barcode: p.barcode||'',
     specs: p.specs||{}, sizing_chart_data: p.sizingChartData||[],
     care_instructions: p.careInstructions||'', model_info: p.modelInfo||'',
     slot1_status: p.slot1Status||'empty', slot2_status: p.slot2Status||'empty', slot3_status: p.slot3Status||'empty',
@@ -509,6 +505,7 @@ function rowToProduct(row){
     currency: row.currency||'ZAR',
     weightGrams: row.weight_grams!=null?String(row.weight_grams):'',
     supplierName: row.supplier_name||'', supplierUrl: row.supplier_url||'',
+    barcode: row.barcode||'',
     specs: row.specs||{}, sizingChartData: row.sizing_chart_data||[],
     careInstructions: row.care_instructions||'', modelInfo: row.model_info||'',
     slot1Status: row.slot1_status||'empty', slot2Status: row.slot2_status||'empty', slot3Status: row.slot3_status||'empty',
@@ -843,7 +840,7 @@ function scoreProduct(p){
 }
 
 function applySidebarWidth(){
-  document.querySelector('main').style.gridTemplateColumns = `${state.sidebarWidth}px 1fr 200px`;
+  document.querySelector('main').style.gridTemplateColumns = `${state.sidebarWidth}px 1fr`;
 }
 
 function initSidebarDrag(){
@@ -942,6 +939,7 @@ function newProduct(overrides={}){
     weightGrams: '',
     supplierUrl: '',
     supplierName: '',
+    barcode: overrides.barcode || generateEAN13(),  // EAN-13 auto-generated
     currency: state.settings.currency,
     ...overrides
   };
@@ -1007,7 +1005,7 @@ async function addImagesFromFiles(files, target='product'){
 }
 
 // ============ RENDER ============
-function renderAll(){ renderList(); renderEditor(); renderProgress(); renderFilterBar(); renderScorecard(); }
+function renderAll(){ renderList(); renderEditor(); renderProgress(); renderScorecard(); }
 
 function renderProgress(){
   const total = state.products.length;
@@ -1128,8 +1126,12 @@ async function renderEditor(){
           <datalist id="categoryList">${[...new Set(state.products.map(x=>x.category).filter(Boolean))].map(c=>`<option value="${escapeAttr(c)}">`).join('')}</datalist>
         </div>
         <div class="field">
-          <label>Tags (comma separated)</label>
-          <input value="${escapeAttr(p.tags)}" oninput="upd('tags',this.value)" placeholder="velvet, formal, summer">
+          <label>Barcode (EAN-13)</label>
+          <div style="display:flex;gap:6px;align-items:center">
+            <input id="barcodeInput-${p.id}" value="${escapeAttr(p.barcode||'')}" oninput="upd('barcode',this.value);renderBarcodePreview('${p.id}')" placeholder="Auto-generated" style="flex:1;font-family:monospace;letter-spacing:2px">
+            <button class="small-action" onclick="regenerateBarcode('${p.id}')" title="Generate new barcode">↻</button>
+          </div>
+          <div class="barcode-img" id="barcodePreview-${p.id}"></div>
         </div>
         <div class="field field-full">
           <label>SEO Keywords (Google)</label>
@@ -1232,6 +1234,7 @@ async function renderEditor(){
   await renderSlotThumbs(p);
   await renderGalleryThumbs(p);
   renderCalc();
+  renderBarcodeAfterEditor(p);
   attachDrop('dropGallery', files=>addGalleryImages(files));
   [1,2,3].forEach(n => attachDrop('slotDrop'+n, files=>addSlotImages(n, files)));
 }
@@ -1568,6 +1571,11 @@ function openSettings(){
       <label>Anthropic API Key (for Smart Import)</label>
       <input type="password" id="setApiKey" value="${escapeAttr(state.settings.apiKey||'')}" placeholder="sk-ant-...">
       <div class="help">Get one at console.anthropic.com. Stored only in this browser. Required for Smart Import.</div>
+    </div>
+    <div style="border-top:1px solid var(--border);padding-top:14px;margin-top:14px">
+      <label style="display:block;margin-bottom:8px">🏷 Barcodes</label>
+      <button class="btn" onclick="generateMissingBarcodes();this.closest('.modal-bg').remove()">Generate missing barcodes for all products</button>
+      <div class="help" style="margin-top:6px">Assigns a new EAN-13 barcode to any product that doesn't have one yet. Won't overwrite existing barcodes.</div>
     </div>
     <div style="border-top:1px solid var(--border);padding-top:14px;margin-top:14px">
       <label style="display:block;margin-bottom:8px">⚠ Restore from backup</label>
@@ -3089,6 +3097,249 @@ function showMotivationalQuote(){
   document.body.appendChild(m);
   // Close on background click
   m.addEventListener('click', e => { if (e.target === m) m.remove(); });
+}
+
+// ============ BARCODE (EAN-13) ============
+function calcEAN13CheckDigit(digits12){
+  // EAN-13: alternate multiply by 1 and 3, sum, subtract from next multiple of 10
+  let sum = 0;
+  for (let i = 0; i < 12; i++) {
+    sum += parseInt(digits12[i]) * (i % 2 === 0 ? 1 : 3);
+  }
+  return (10 - (sum % 10)) % 10;
+}
+
+function generateEAN13(){
+  // SA prefix 600 + 9 random digits + 1 check digit
+  const prefix = '600';
+  let middle = '';
+  for (let i = 0; i < 9; i++) middle += Math.floor(Math.random() * 10);
+  const digits12 = prefix + middle;
+  const check = calcEAN13CheckDigit(digits12);
+  return digits12 + check;
+}
+
+function validateEAN13(code){
+  if (!code || code.length !== 13 || !/^\d{13}$/.test(code)) return false;
+  return calcEAN13CheckDigit(code.slice(0, 12)) === parseInt(code[12]);
+}
+
+function renderBarcodePreview(productId){
+  const input = document.getElementById('barcodeInput-'+productId);
+  const preview = document.getElementById('barcodePreview-'+productId);
+  if (!preview) return;
+  const code = input ? input.value.trim() : '';
+  if (!code || !validateEAN13(code)) {
+    preview.innerHTML = code.length > 0 ? '<span style="font-size:10px;color:#f87171">Invalid EAN-13</span>' : '';
+    return;
+  }
+  preview.innerHTML = '<svg id="barsvg-'+productId+'"></svg>';
+  try {
+    JsBarcode('#barsvg-'+productId, code, {
+      format: 'EAN13', width: 2, height: 60, displayValue: true,
+      fontOptions: '', font: 'Inter', textAlign: 'center', textPosition: 'bottom',
+      textMargin: 4, fontSize: 14, background: '#ffffff', lineColor: '#000000',
+      margin: 6
+    });
+  } catch(e){ preview.innerHTML = '<span style="font-size:10px;color:#f87171">Barcode error</span>'; }
+}
+
+function regenerateBarcode(productId){
+  const p = state.products.find(x => x.id === productId);
+  if (!p) return;
+  p.barcode = generateEAN13();
+  saveProduct(p);
+  renderEditor();
+}
+
+function generateMissingBarcodes(){
+  let count = 0;
+  for (const p of state.products) {
+    if (!p.barcode || !validateEAN13(p.barcode)) {
+      p.barcode = generateEAN13();
+      saveProduct(p);
+      count++;
+    }
+  }
+  if (count > 0) {
+    showToast(`✓ Generated ${count} barcode${count>1?'s':''}`);
+    renderEditor();
+    renderList();
+  } else {
+    showToast('All products already have barcodes');
+  }
+}
+
+// Auto-render barcode after editor renders
+function renderBarcodeAfterEditor(p){
+  if (p.barcode && validateEAN13(p.barcode)) {
+    setTimeout(() => renderBarcodePreview(p.id), 50);
+  }
+}
+
+// ============ BARTENDER CSV EXPORT ============
+async function exportBarTender(){
+  if (!state.products.length){ alert('No products to export'); return; }
+
+  // Ensure all products have barcodes first
+  let generated = 0;
+  for (const p of state.products) {
+    if (!p.barcode || !validateEAN13(p.barcode)) {
+      p.barcode = generateEAN13();
+      await saveProduct(p);
+      generated++;
+    }
+  }
+  if (generated > 0) showToast(`Generated ${generated} missing barcodes`);
+
+  const rows = [['SKU','PRODUCT_NAME','SIZE','BARCODE']];
+
+  for (const p of state.products) {
+    const sizes = Object.entries(p.stockBySize||{})
+      .filter(([,q]) => parseInt(q) > 0)
+      .map(([s]) => s);
+
+    if (sizes.length > 0) {
+      // One row per size
+      for (const size of sizes) {
+        rows.push([
+          p.code || '',
+          p.name || '',
+          size,
+          p.barcode || ''
+        ]);
+      }
+    } else if ((p.sizes||[]).length > 0) {
+      for (const size of p.sizes) {
+        rows.push([p.code||'', p.name||'', size, p.barcode||'']);
+      }
+    } else {
+      // No sizes — single row
+      rows.push([p.code||'', p.name||'', 'ONE SIZE', p.barcode||'']);
+    }
+  }
+
+  const csv = rows.map(r => r.map(cell => {
+    const s = String(cell).replace(/"/g, '""');
+    return s.includes(',') || s.includes('"') || s.includes('\n') ? `"${s}"` : s;
+  }).join(',')).join('\r\n');
+
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  saveAs(blob, `FashionKiller_BarTender_${new Date().toISOString().slice(0,10)}.csv`);
+  showToast('✓ BarTender CSV ready! Import into BarTender Starter.');
+}
+
+// ============ XLSX IMPORT (old stock sheet) ============
+function openXlsxImport(){
+  const m = document.createElement('div');
+  m.className = 'modal-bg';
+  m.innerHTML = `<div class="modal" style="max-width:520px">
+    <h3>📥 Import from Excel / CSV</h3>
+    <p style="color:var(--muted);font-size:13px;margin-bottom:16px">Import products from Dommie's old stock spreadsheet. Text data only — images cannot be imported from Excel.<br><br>Expected columns: SKU, NAME (or PRODUCT NAME), DESCRIPTION, SIZES, RETAIL PRICE (or PRICE), WHOLESALE (or COST), COLOURS (or COLOUR), SUPPLIER.</p>
+    <div class="field" style="margin-bottom:14px">
+      <label>Select your .xlsx or .csv file</label>
+      <input type="file" id="xlsxImportFile" accept=".xlsx,.xls,.csv" style="margin-top:6px">
+    </div>
+    <div id="xlsxImportPreview" style="font-size:12px;color:var(--muted);margin-bottom:14px"></div>
+    <div class="modal-actions">
+      <button class="btn" onclick="this.closest('.modal-bg').remove()">Cancel</button>
+      <button class="btn btn-primary" onclick="runXlsxImport()">Import Products</button>
+    </div>
+  </div>`;
+  document.body.appendChild(m);
+  document.getElementById('xlsxImportFile').addEventListener('change', previewXlsx);
+}
+
+let xlsxImportData = null;
+
+async function previewXlsx(e){
+  const file = e.target.files[0];
+  if (!file) return;
+  const preview = document.getElementById('xlsxImportPreview');
+  preview.textContent = 'Reading file...';
+  try {
+    const buf = await file.arrayBuffer();
+    const wb = XLSX.read(buf, {type:'array'});
+    const ws = wb.Sheets[wb.SheetNames[0]];
+    const rows = XLSX.utils.sheet_to_json(ws, {defval:''});
+    xlsxImportData = rows;
+    preview.innerHTML = `<span style="color:var(--good)">✓ Found ${rows.length} rows in sheet "${wb.SheetNames[0]}"</span><br>
+    <span style="color:var(--muted)">Columns: ${Object.keys(rows[0]||{}).join(', ')}</span>`;
+  } catch(err) {
+    preview.innerHTML = `<span style="color:#f87171">Error reading file: ${err.message}</span>`;
+  }
+}
+
+async function runXlsxImport(){
+  if (!xlsxImportData || !xlsxImportData.length) { alert('Please select a file first'); return; }
+
+  // Column name mapping — case-insensitive, handles variations
+  function findCol(row, ...candidates){
+    const keys = Object.keys(row);
+    for (const c of candidates) {
+      const found = keys.find(k => k.toLowerCase().trim() === c.toLowerCase());
+      if (found) return String(row[found]||'').trim();
+    }
+    return '';
+  }
+
+  let imported = 0, skipped = 0;
+  const existingCodes = new Set(state.products.map(p => p.code).filter(Boolean));
+
+  for (const row of xlsxImportData) {
+    const code = findCol(row, 'sku', 'stock code', 'code', 'product code', 'item code');
+    const name = findCol(row, 'name of product', 'product name', 'name', 'item name', 'title');
+    if (!name && !code) { skipped++; continue; }
+    if (code && existingCodes.has(code)) { skipped++; continue; } // skip duplicates
+
+    const sizesRaw = findCol(row, 'sizes', 'size', 'size ordered');
+    const retail = parseFloat(findCol(row, 'retail price', 'retail', 'selling price', 'price'))||0;
+    const wholesale = parseFloat(findCol(row, 'wholesale price', 'wholesale', 'cost price', 'cost'))||0;
+    const colour = findCol(row, 'colours', 'colour', 'color', 'colors');
+    const supplier = findCol(row, 'supplier', 'vendor', 'supplier name');
+    const shortDesc = findCol(row, 'short product description', 'short description', 'description');
+
+    // Parse sizes like "1 x S, 2 x M" or "S,M,L"
+    const stockBySize = {};
+    const sizes = [];
+    if (sizesRaw) {
+      const parts = sizesRaw.split(/[,;]/);
+      for (const part of parts) {
+        const m = part.trim().match(/^(\d+)\s*[xX×]\s*(.+)$/);
+        if (m) {
+          const qty = parseInt(m[1]);
+          const sz = m[2].trim();
+          stockBySize[sz] = qty;
+          sizes.push(sz);
+        } else if (part.trim()) {
+          sizes.push(part.trim());
+        }
+      }
+    }
+
+    const p = newProduct({
+      code: code || `FK-IMP-${Date.now()}-${imported}`,
+      name,
+      shortDescription: shortDesc,
+      retailPrice: retail ? String(retail) : '',
+      costPrice: wholesale ? String(wholesale) : '',
+      colours: colour ? colour.split(/[,;]/).map(c=>c.trim()).filter(Boolean) : [],
+      sizes,
+      stockBySize,
+      supplierName: supplier,
+      barcode: generateEAN13(),
+    });
+
+    state.products.push(p);
+    if (code) existingCodes.add(code);
+    await saveProduct(p);
+    imported++;
+  }
+
+  await saveMeta();
+  document.querySelector('.modal-bg')?.remove();
+  renderAll();
+  showToast(`✓ Imported ${imported} products${skipped?' ('+skipped+' skipped)':''}`);
 }
 
 // ============ INIT ============
