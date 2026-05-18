@@ -301,6 +301,7 @@
         <button class="btn btn-ghost" style="width:100%;text-align:left;border:none;padding:10px 12px;display:block" onclick="exportData();closeExportMenu()">📊 Detailed XLSX + images zip</button>
         <button class="btn btn-ghost" style="width:100%;text-align:left;border:none;padding:10px 12px;display:block" onclick="exportWooCommerce();closeExportMenu()">🛒 WooCommerce CSV (for website lady)</button>
         <button class="btn btn-ghost" style="width:100%;text-align:left;border:none;padding:10px 12px;display:block" onclick="exportBarTender();closeExportMenu()">📦 BarTender Label CSV</button>
+        <button class="btn btn-ghost" style="width:100%;text-align:left;border:none;padding:10px 12px;display:block" onclick="exportExcelWithBarcodes();closeExportMenu()">🏷️ Excel with Barcode Images</button>
         <button class="btn btn-ghost" style="width:100%;text-align:left;border:none;padding:10px 12px;display:block" onclick="exportBackup();closeExportMenu()">💾 Full Backup (restorable)</button>
         <div style="border-top:1px solid var(--border);margin:4px 0"></div>
         <button class="btn btn-ghost" style="width:100%;text-align:left;border:none;padding:10px 12px;display:block" onclick="openXlsxImport();closeExportMenu()">📥 Import from Excel / CSV</button>
@@ -3252,6 +3253,171 @@ async function exportBarTender(){
   const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
   saveAs(blob, `FashionKiller_BarTender_${new Date().toISOString().slice(0,10)}.csv`);
   showToast(`✓ BarTender CSV — ${rowsArr.length - 1} label rows ready`);
+}
+
+// ============ EXCEL WITH BARCODE IMAGES EXPORT ============
+async function exportExcelWithBarcodes(){
+  if (!state.products.length){ alert('No products to export'); return; }
+
+  showToast('⏳ Generating Excel with barcode images...');
+
+  // Ensure barcodes exist (same logic as BarTender export)
+  let generated = 0;
+  for (const p of state.products) {
+    if (!p.barcodesBySize) p.barcodesBySize = {};
+    const allSizes = [...new Set([
+      ...Object.keys(p.stockBySize||{}),
+      ...(p.sizes||[])
+    ])];
+    if (allSizes.length === 0) allSizes.push('ONE SIZE');
+    let changed = false;
+    for (const size of allSizes) {
+      if (!p.barcodesBySize[size] || !validateEAN13(p.barcodesBySize[size])) {
+        p.barcodesBySize[size] = generateEAN13();
+        changed = true;
+        generated++;
+      }
+    }
+    if (!p.barcode || !validateEAN13(p.barcode)) {
+      p.barcode = p.barcodesBySize[allSizes[0]];
+      changed = true;
+    }
+    if (changed) await saveProduct(p);
+  }
+  if (generated > 0) showToast(`Generated ${generated} size barcodes`);
+
+  // Helper: render a barcode to a PNG base64 string using a hidden canvas
+  function barcodeToPng(code, w, h){
+    const canvas = document.createElement('canvas');
+    // Use a temporary SVG to get JsBarcode output, then draw to canvas
+    const svgNS = 'http://www.w3.org/2000/svg';
+    const tmpSvg = document.createElementNS(svgNS, 'svg');
+    document.body.appendChild(tmpSvg);
+    try {
+      JsBarcode(tmpSvg, code, {
+        format:'EAN13', width:2, height:50, displayValue:true,
+        font:'Arial', textAlign:'center', textPosition:'bottom',
+        textMargin:3, fontSize:12, background:'#ffffff', lineColor:'#000000', margin:4
+      });
+    } catch(e){ document.body.removeChild(tmpSvg); return null; }
+
+    const svgData = new XMLSerializer().serializeToString(tmpSvg);
+    document.body.removeChild(tmpSvg);
+
+    // Draw SVG to canvas
+    const svgW = parseInt(tmpSvg.getAttribute('width'))||200;
+    const svgH = parseInt(tmpSvg.getAttribute('height'))||80;
+    canvas.width = svgW;
+    canvas.height = svgH;
+
+    return new Promise((resolve)=>{
+      const img = new Image();
+      img.onload = function(){
+        const ctx = canvas.getContext('2d');
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0,0,canvas.width,canvas.height);
+        ctx.drawImage(img, 0, 0);
+        // Get base64 without the data:image/png;base64, prefix
+        const dataUrl = canvas.toDataURL('image/png');
+        const base64 = dataUrl.split(',')[1];
+        resolve({ base64, width: svgW, height: svgH });
+      };
+      img.onerror = function(){ resolve(null); };
+      img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svgData);
+    });
+  }
+
+  // Build workbook with ExcelJS
+  const wb = new ExcelJS.Workbook();
+  wb.creator = 'FashionKiller Intake';
+  wb.created = new Date();
+  const ws = wb.addWorksheet('Barcodes');
+
+  // Header row
+  const headers = ['SKU','Product Name','Size','Retail Price','Barcode Number','Barcode Image','QTY'];
+  const headerRow = ws.addRow(headers);
+  headerRow.font = { bold:true, size:11, color:{argb:'FFFFFFFF'} };
+  headerRow.fill = { type:'pattern', pattern:'solid', fgColor:{argb:'FFFF006E'} };
+  headerRow.alignment = { vertical:'middle', horizontal:'center' };
+  headerRow.height = 28;
+
+  // Column widths
+  ws.getColumn(1).width = 18;  // SKU
+  ws.getColumn(2).width = 30;  // Product Name
+  ws.getColumn(3).width = 12;  // Size
+  ws.getColumn(4).width = 14;  // Retail Price
+  ws.getColumn(5).width = 18;  // Barcode Number
+  ws.getColumn(6).width = 30;  // Barcode Image
+  ws.getColumn(7).width = 8;   // QTY
+
+  // Build data rows
+  let rowNum = 2;
+  for (const p of state.products) {
+    const price = parseFloat(p.retailPrice)||0;
+    const priceVal = price > 0 ? Math.round(price) : '';
+    const sizedStock = Object.entries(p.stockBySize||{}).filter(([,q]) => parseInt(q) > 0);
+
+    let sizeRows = [];
+    if (sizedStock.length > 0) {
+      for (const [size, qty] of sizedStock) {
+        const bc = (p.barcodesBySize||{})[size] || p.barcode || '';
+        sizeRows.push({ size, bc, qty: parseInt(qty)||1 });
+      }
+    } else if ((p.sizes||[]).length > 0) {
+      for (const size of p.sizes) {
+        const bc = (p.barcodesBySize||{})[size] || p.barcode || '';
+        sizeRows.push({ size, bc, qty: 1 });
+      }
+    } else {
+      const bc = (p.barcodesBySize||{})['ONE SIZE'] || p.barcode || '';
+      sizeRows.push({ size: 'ONE SIZE', bc, qty: 1 });
+    }
+
+    for (const sr of sizeRows) {
+      const row = ws.addRow([
+        p.code||'',
+        p.name||'',
+        sr.size,
+        priceVal,
+        sr.bc,  // barcode number as text
+        '',     // placeholder for image
+        sr.qty
+      ]);
+
+      // Format barcode number column as text so Excel doesn't mangle it
+      row.getCell(5).numFmt = '@';
+      row.height = 55; // tall enough for barcode image
+
+      // Render barcode image and embed it
+      if (sr.bc && validateEAN13(sr.bc)) {
+        const imgData = await barcodeToPng(sr.bc);
+        if (imgData) {
+          const imgId = wb.addImage({
+            base64: imgData.base64,
+            extension: 'png'
+          });
+          // Place image in column F (index 5), current row
+          ws.addImage(imgId, {
+            tl: { col: 5, row: rowNum - 1 },
+            ext: { width: 180, height: 50 }
+          });
+        }
+      }
+      rowNum++;
+    }
+  }
+
+  // Auto-filter on headers
+  ws.autoFilter = { from:'A1', to: `G${rowNum-1}` };
+
+  // Freeze header row
+  ws.views = [{ state:'frozen', ySplit:1 }];
+
+  // Generate and download
+  const buffer = await wb.xlsx.writeBuffer();
+  const blob = new Blob([buffer], { type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+  saveAs(blob, `FashionKiller_Barcodes_${new Date().toISOString().slice(0,10)}.xlsx`);
+  showToast(`✓ Excel with barcode images — ${rowNum - 2} rows exported`);
 }
 
 // ============ XLSX IMPORT (old stock sheet) ============
